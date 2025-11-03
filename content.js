@@ -394,8 +394,10 @@
   let sidePanelPriceEl = null;
   let priceObserver = null;
   let sidePanelPollTimer = null;
+  let sidePanelEnabled = true;
 
   function ensureSidePanel() {
+    if (!sidePanelEnabled) return;
     if (sidePanel && document.body.contains(sidePanel)) return;
 
     // Create container
@@ -495,7 +497,7 @@
   }
 
   function syncSidePanelWithPage() {
-    if (!sidePanel) return;
+    if (!sidePanel || !sidePanelEnabled) return;
     const symbolName = detectSymbolName() || (currentAlphaContract ? currentAlphaContract.address : '-');
     const symbolEl = document.getElementById('alpharoller-symbol');
     if (symbolEl) symbolEl.textContent = symbolName;
@@ -601,6 +603,38 @@
     const cleaned = text.replace(/[,\s]/g, '');
     return /^(\$)?\d*(?:\.|\,)??\d{1,8}$/.test(cleaned) || /^(\$)?\d+$/i.test(cleaned);
   }
+
+  // Load sidePanelEnabled from storage at startup
+  chrome.storage.local.get(['sidePanelEnabled'], (res) => {
+    if (res.sidePanelEnabled !== undefined) sidePanelEnabled = !!res.sidePanelEnabled;
+  });
+
+  // Extend message handler for panel toggling
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request && request.action === 'toggleSidePanel') {
+      sidePanelEnabled = !sidePanelEnabled;
+      chrome.storage.local.set({ sidePanelEnabled });
+      if (sidePanelEnabled) {
+        ensureSidePanel();
+        syncSidePanelWithPage();
+      } else {
+        removeSidePanel();
+      }
+      sendResponse && sendResponse({ enabled: sidePanelEnabled });
+      return true;
+    } else if (request && request.action === 'setSidePanel') {
+      sidePanelEnabled = !!request.enabled;
+      chrome.storage.local.set({ sidePanelEnabled });
+      if (sidePanelEnabled) {
+        ensureSidePanel();
+        syncSidePanelWithPage();
+      } else {
+        removeSidePanel();
+      }
+      sendResponse && sendResponse({ enabled: sidePanelEnabled });
+      return true;
+    }
+  });
 
   async function commitTransactionsForSymbols(symbols) {
     console.log('AlphaRoller: Committing transactions for symbols:', symbols);

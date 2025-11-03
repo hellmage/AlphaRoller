@@ -13,12 +13,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const commitSection = document.getElementById('commitSection');
   const commitButton = document.getElementById('commitButton');
   const dryRunToggle = document.getElementById('dryRunToggle');
+  const togglePanelButton = document.getElementById('togglePanelButton');
 
   // Load saved state
   loadState();
 
   // Check for current Alpha page
   checkCurrentAlphaPage();
+  initSidePanelButton();
 
   // Toggle auto-trading
   if (enableToggle) {
@@ -91,6 +93,45 @@ document.addEventListener('DOMContentLoaded', () => {
           commitButton.disabled = false;
         }, 3000);
       }
+    });
+  }
+
+  function initSidePanelButton() {
+    if (!togglePanelButton) return;
+    // Initialize label from storage
+    chrome.storage.local.get(['sidePanelEnabled'], (result) => {
+      const enabled = result.sidePanelEnabled !== undefined ? result.sidePanelEnabled : true;
+      togglePanelButton.textContent = enabled ? 'Hide Side Panel' : 'Show Side Panel';
+    });
+
+    togglePanelButton.addEventListener('click', async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.url || !tab.url.includes('binance.com')) return;
+
+      // Determine desired next state from storage, then explicitly set it
+      chrome.storage.local.get(['sidePanelEnabled'], (res) => {
+        const next = !(res.sidePanelEnabled !== undefined ? res.sidePanelEnabled : true);
+        const updateLabel = (on) => {
+          togglePanelButton.textContent = on ? 'Hide Side Panel' : 'Show Side Panel';
+          chrome.storage.local.set({ sidePanelEnabled: on });
+        };
+
+        let responded = false;
+        chrome.tabs.sendMessage(tab.id, { action: 'setSidePanel', enabled: next }, (response) => {
+          responded = true;
+          const enabled = response && typeof response.enabled === 'boolean' ? response.enabled : next;
+          updateLabel(enabled);
+        });
+
+        // If no response (content script not ready), retry once after delay
+        setTimeout(() => {
+          if (responded) return;
+          chrome.tabs.sendMessage(tab.id, { action: 'setSidePanel', enabled: next }, (response) => {
+            const enabled = response && typeof response.enabled === 'boolean' ? response.enabled : next;
+            updateLabel(enabled);
+          });
+        }, 500);
+      });
     });
   }
 

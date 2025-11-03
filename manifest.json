@@ -5,7 +5,8 @@
   "description": "Commit transactions of alpha symbols on Binance",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.binance.com/*",
