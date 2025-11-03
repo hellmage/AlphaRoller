@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AlphaRoller</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>AlphaRoller</h1>
+      <p class="subtitle">Binance Alpha Symbol Trader</p>
+    </div>
+    <div class="content">
+      <div id="alphaPageInfo" class="alpha-page-info" style="display: none;">
+        <div class="alpha-header">
+          <span class="alpha-label">Alpha Page Detected</span>
+        </div>
+        <div class="alpha-details">
+          <div class="alpha-item">
+            <span class="alpha-detail-label">Chain:</span>
+            <span id="alphaChain" class="alpha-detail-value">-</span>
+          </div>
+          <div class="alpha-item">
+            <span class="alpha-detail-label">Contract:</span>
+            <span id="alphaContract" class="alpha-detail-value">-</span>
+          </div>
+        </div>
+      </div>
+      <div class="status-section">
+        <div class="status-item">
+          <span class="status-label">Status:</span>
+          <span id="status" class="status-value">Inactive</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Symbols Detected:</span>
+          <span id="symbolCount" class="status-value">0</span>
+        </div>
+      </div>
+      
+      <div class="controls-section">
+        <label class="toggle-label">
+          <input type="checkbox" id="enableToggle" />
+          <span>Enable Auto-Trading</span>
+        </label>
+        
+        <div class="symbol-list" id="symbolList">
+          <p class="no-symbols">No alpha symbols detected yet</p>
+        </div>
+      </div>
+      
+      <div class="button-section">
+        <button id="refreshButton" class="secondary-button">Refresh</button>
+        <button id="scanButton" class="secondary-button">Scan Symbols</button>
+      </div>
+      <div id="commitSection" class="commit-section" style="display: none;">
+        <button id="commitButton" class="primary-button commit-btn">Commit Transaction</button>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
+
