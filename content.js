@@ -93,6 +93,10 @@
         contract: currentAlphaContract
       });
 
+      // Ensure side panel is visible and synced
+      ensureSidePanel();
+      syncSidePanelWithPage();
+
       // If auto-trading is enabled, attempt to commit transaction
       if (autoTradingEnabled) {
         // Wait a bit for page to load, then attempt transaction
@@ -102,6 +106,7 @@
       }
     } else {
       currentAlphaContract = null;
+      removeSidePanel();
       chrome.storage.local.remove('currentAlpha');
     }
   }
@@ -380,6 +385,221 @@
            style.opacity !== '0' &&
            element.offsetWidth > 0 &&
            element.offsetHeight > 0;
+  }
+
+  // =========================
+  // Side Panel (Alpha Info)
+  // =========================
+  let sidePanel = null;
+  let sidePanelPriceEl = null;
+  let priceObserver = null;
+  let sidePanelPollTimer = null;
+
+  function ensureSidePanel() {
+    if (sidePanel && document.body.contains(sidePanel)) return;
+
+    // Create container
+    sidePanel = document.createElement('div');
+    sidePanel.id = 'alpharoller-side-panel';
+    sidePanel.setAttribute('style', [
+      'position: fixed',
+      'top: 0',
+      'right: 0',
+      'height: 100vh',
+      'width: 300px',
+      'z-index: 2147483647',
+      'background: #0b0e11',
+      'color: #eaecef',
+      'box-shadow: -2px 0 12px rgba(0,0,0,0.4)',
+      'border-left: 1px solid rgba(255,255,255,0.08)',
+      'display: flex',
+      'flex-direction: column',
+      'font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+    ].join(';'));
+
+    const header = document.createElement('div');
+    header.setAttribute('style', [
+      'padding: 12px 14px',
+      'display: flex',
+      'align-items: center',
+      'justify-content: space-between',
+      'border-bottom: 1px solid rgba(255,255,255,0.08)'
+    ].join(';'));
+    const title = document.createElement('div');
+    title.textContent = 'AlphaRoller';
+    title.setAttribute('style', 'font-weight: 700; letter-spacing: .3px;');
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.setAttribute('style', [
+      'background: transparent',
+      'border: none',
+      'color: #eaecef',
+      'font-size: 20px',
+      'cursor: pointer'
+    ].join(';'));
+    closeBtn.addEventListener('click', removeSidePanel);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.setAttribute('style', 'padding: 14px; display: flex; flex-direction: column; gap: 12px;');
+
+    const symbolRow = document.createElement('div');
+    symbolRow.setAttribute('style', 'display: flex; flex-direction: column; gap: 6px;');
+    const symbolLabel = document.createElement('div');
+    symbolLabel.textContent = 'Symbol';
+    symbolLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
+    const symbolValue = document.createElement('div');
+    symbolValue.id = 'alpharoller-symbol';
+    symbolValue.textContent = '-';
+    symbolValue.setAttribute('style', 'font-size: 18px; font-weight: 700;');
+    symbolRow.appendChild(symbolLabel);
+    symbolRow.appendChild(symbolValue);
+
+    const priceRow = document.createElement('div');
+    priceRow.setAttribute('style', 'display: flex; flex-direction: column; gap: 6px;');
+    const priceLabel = document.createElement('div');
+    priceLabel.textContent = 'Price';
+    priceLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
+    const priceValue = document.createElement('div');
+    priceValue.id = 'alpharoller-price';
+    priceValue.textContent = '-';
+    priceValue.setAttribute('style', 'font-size: 22px; font-weight: 800; color: #f0b90b;');
+    priceRow.appendChild(priceLabel);
+    priceRow.appendChild(priceValue);
+
+    body.appendChild(symbolRow);
+    body.appendChild(priceRow);
+
+    sidePanel.appendChild(header);
+    sidePanel.appendChild(body);
+
+    document.body.appendChild(sidePanel);
+  }
+
+  function removeSidePanel() {
+    if (priceObserver) {
+      try { priceObserver.disconnect(); } catch (e) {}
+      priceObserver = null;
+    }
+    if (sidePanelPollTimer) {
+      clearInterval(sidePanelPollTimer);
+      sidePanelPollTimer = null;
+    }
+    if (sidePanel && sidePanel.parentNode) {
+      sidePanel.parentNode.removeChild(sidePanel);
+    }
+    sidePanel = null;
+    sidePanelPriceEl = null;
+  }
+
+  function syncSidePanelWithPage() {
+    if (!sidePanel) return;
+    const symbolName = detectSymbolName() || (currentAlphaContract ? currentAlphaContract.address : '-');
+    const symbolEl = document.getElementById('alpharoller-symbol');
+    if (symbolEl) symbolEl.textContent = symbolName;
+
+    const priceEl = detectPriceElement();
+    const priceValueEl = document.getElementById('alpharoller-price');
+
+    if (priceEl && priceValueEl) {
+      sidePanelPriceEl = priceEl;
+      // Initial set
+      priceValueEl.textContent = (priceEl.textContent || '').trim();
+
+      // Observe mutations on the price element
+      if (priceObserver) {
+        try { priceObserver.disconnect(); } catch (e) {}
+      }
+      priceObserver = new MutationObserver(() => {
+        priceValueEl.textContent = (priceEl.textContent || '').trim();
+      });
+      priceObserver.observe(priceEl, { characterData: true, subtree: true, childList: true });
+
+      // Fallback polling in case Binance re-renders the node entirely
+      if (sidePanelPollTimer) clearInterval(sidePanelPollTimer);
+      sidePanelPollTimer = setInterval(() => {
+        if (!document.body.contains(priceEl)) {
+          // Re-detect
+          const newEl = detectPriceElement();
+          if (newEl) {
+            sidePanelPriceEl = newEl;
+            priceValueEl.textContent = (newEl.textContent || '').trim();
+            if (priceObserver) {
+              try { priceObserver.disconnect(); } catch (e) {}
+            }
+            priceObserver = new MutationObserver(() => {
+              priceValueEl.textContent = (newEl.textContent || '').trim();
+            });
+            priceObserver.observe(newEl, { characterData: true, subtree: true, childList: true });
+          }
+        } else {
+          // Keep in sync
+          priceValueEl.textContent = (priceEl.textContent || '').trim();
+        }
+      }, 1500);
+    }
+  }
+
+  function detectSymbolName() {
+    // Try common Alpha token name locations
+    const candidates = [
+      '[data-testid*="alpha"] [data-testid*="name"]',
+      '[class*="alpha"] [class*="name"]',
+      'h1, h2, h3'
+    ];
+    for (const sel of candidates) {
+      try {
+        const el = document.querySelector(sel);
+        if (el && el.textContent && el.textContent.trim().length > 0) {
+          const txt = el.textContent.trim();
+          if (txt.length >= 2 && txt.length <= 64) return txt;
+        }
+      } catch (e) {}
+    }
+    // Fallback: try title
+    if (document.title) {
+      const m = document.title.match(/Alpha\s*[-|•]\s*(.+)/i);
+      if (m) return m[1].trim();
+    }
+    return null;
+  }
+
+  function detectPriceElement() {
+    // Try likely price selectors on Binance
+    const selectors = [
+      '[data-testid*="price"]',
+      '[class*="price"]',
+      '[class*="Price"]',
+      '[data-bn-type="text"]:not([class])' // Sometimes Binance uses data-bn-type spans
+    ];
+    for (const sel of selectors) {
+      const els = document.querySelectorAll(sel);
+      for (const el of els) {
+        const txt = (el.textContent || '').trim();
+        if (looksLikePrice(txt)) {
+          return el;
+        }
+      }
+    }
+    // Generic fallback: scan for prominent number with decimals and optional currency
+    const all = document.querySelectorAll('span, div');
+    for (const el of all) {
+      const style = window.getComputedStyle(el);
+      if (parseFloat(style.fontSize) >= 18 && isElementVisible(el)) {
+        const txt = (el.textContent || '').trim();
+        if (looksLikePrice(txt)) return el;
+      }
+    }
+    return null;
+  }
+
+  function looksLikePrice(text) {
+    if (!text) return false;
+    // Common price formats: 123.45, $123.45, 0.000123, 1,234.56
+    const cleaned = text.replace(/[,\s]/g, '');
+    return /^(\$)?\d*(?:\.|\,)??\d{1,8}$/.test(cleaned) || /^(\$)?\d+$/i.test(cleaned);
   }
 
   async function commitTransactionsForSymbols(symbols) {
