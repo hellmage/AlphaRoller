@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const alphaContract = document.getElementById('alphaContract');
   const commitSection = document.getElementById('commitSection');
   const commitButton = document.getElementById('commitButton');
+  const dryRunToggle = document.getElementById('dryRunToggle');
 
   // Load saved state
   loadState();
@@ -34,6 +35,24 @@ document.addEventListener('DOMContentLoaded', () => {
           enabled: enabled
         });
       }
+    });
+  }
+
+  // Toggle dry run
+  if (dryRunToggle) {
+    dryRunToggle.addEventListener('change', async (e) => {
+      const dryRun = e.target.checked;
+      await chrome.storage.local.set({ dryRunEnabled: dryRun });
+      // Inform content script (optional; it also reads from storage)
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab.url && tab.url.includes('binance.com')) {
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'setDryRun',
+          enabled: dryRun
+        });
+      }
+      // Refresh status display to reflect dry run
+      loadState();
     });
   }
 
@@ -76,18 +95,22 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadState() {
-    const result = await chrome.storage.local.get(['autoTradingEnabled', 'detectedSymbols']);
+    const result = await chrome.storage.local.get(['autoTradingEnabled', 'detectedSymbols', 'dryRunEnabled']);
     const enabled = result.autoTradingEnabled || false;
     const symbols = result.detectedSymbols || [];
+    const dryRun = result.dryRunEnabled !== undefined ? result.dryRunEnabled : true;
 
     if (enableToggle) enableToggle.checked = enabled;
-    updateStatus(enabled);
+    if (dryRunToggle) dryRunToggle.checked = dryRun;
+    updateStatus(enabled, dryRun);
     updateSymbolList(symbols);
   }
 
-  function updateStatus(enabled) {
+  function updateStatus(enabled, dryRun) {
     if (statusElement) {
-      statusElement.textContent = enabled ? 'Active' : 'Inactive';
+      let text = enabled ? 'Active' : 'Inactive';
+      if (dryRun) text += ' (Dry Run)';
+      statusElement.textContent = text;
       statusElement.style.color = enabled ? '#0f9d58' : '#999';
     }
   }

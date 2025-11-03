@@ -7,6 +7,7 @@
 
   let autoTradingEnabled = false;
   let detectedSymbols = new Set();
+  let dryRunEnabled = true;
   let currentAlphaContract = null;
   let observer = null;
 
@@ -15,11 +16,12 @@
 
   async function init() {
     // Load saved state
-    const result = await chrome.storage.local.get(['autoTradingEnabled', 'detectedSymbols']);
+    const result = await chrome.storage.local.get(['autoTradingEnabled', 'detectedSymbols', 'dryRunEnabled']);
     autoTradingEnabled = result.autoTradingEnabled || false;
     if (result.detectedSymbols) {
       detectedSymbols = new Set(result.detectedSymbols);
     }
+    dryRunEnabled = result.dryRunEnabled !== undefined ? result.dryRunEnabled : true;
 
     // Check if we're on an Alpha symbol page
     checkAlphaPage();
@@ -38,6 +40,10 @@
         sendResponse({ success: true });
       } else if (request.action === 'scanSymbols') {
         scanForAlphaSymbols();
+        sendResponse({ success: true });
+      } else if (request.action === 'setDryRun') {
+        dryRunEnabled = !!request.enabled;
+        chrome.storage.local.set({ dryRunEnabled });
         sendResponse({ success: true });
       } else if (request.action === 'commitNow') {
         attemptCommitTransaction();
@@ -234,28 +240,32 @@
       // Small delay before clicking to ensure button is ready
       setTimeout(() => {
         try {
-          // Try multiple click methods
-          if (commitButton.click) {
-            commitButton.click();
-          } else if (commitButton.onclick) {
-            commitButton.onclick();
+          if (!dryRunEnabled) {
+            // Try multiple click methods (actual commit)
+            if (commitButton.click) {
+              commitButton.click();
+            } else if (commitButton.onclick) {
+              commitButton.onclick();
+            } else {
+              // Trigger click event
+              const event = new MouseEvent('click', {
+                bubbles: true,
+                cancelable: true,
+                view: window
+              });
+              commitButton.dispatchEvent(event);
+            }
+            console.log('AlphaRoller: Transaction commit button clicked');
           } else {
-            // Trigger click event
-            const event = new MouseEvent('click', {
-              bubbles: true,
-              cancelable: true,
-              view: window
-            });
-            commitButton.dispatchEvent(event);
+            console.log('AlphaRoller: Dry run enabled - not clicking commit button');
           }
-          
-          console.log('AlphaRoller: Transaction commit button clicked');
           
           // Send notification to background
           chrome.runtime.sendMessage({
             action: 'transactionAttempted',
             contract: currentAlphaContract,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            dryRun: dryRunEnabled
           });
         } catch (error) {
           console.error('AlphaRoller: Error clicking commit button:', error);

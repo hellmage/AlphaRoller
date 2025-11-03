@@ -17,7 +17,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'transactionAttempted') {
     // Log transaction attempts for monitoring
     const contract = request.contract || { address: request.symbol || 'unknown' };
-    console.log(`AlphaRoller: Transaction attempted for ${contract.address || contract.symbol} at ${new Date(request.timestamp).toISOString()}`);
+    const dryRunFlag = request.dryRun === true;
+    console.log(`AlphaRoller: ${dryRunFlag ? '[DRY RUN] ' : ''}Transaction attempted for ${contract.address || contract.symbol} at ${new Date(request.timestamp).toISOString()}`);
     
     // You could add transaction logging, analytics, etc. here
     chrome.storage.local.get(['transactionLog'], (result) => {
@@ -27,7 +28,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chain: contract.chain,
         symbol: request.symbol,
         timestamp: request.timestamp,
-        url: sender.tab?.url
+        url: sender.tab?.url,
+        dryRun: dryRunFlag
       });
       // Keep only last 100 entries
       if (log.length > 100) log.shift();
