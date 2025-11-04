@@ -545,24 +545,8 @@
   }
 
   function detectSymbolName() {
-    // Try common Alpha token name locations
-    const candidates = [
-      '[data-testid*="alpha"] [data-testid*="name"]',
-      '[class*="alpha"] [class*="name"]',
-      'h1, h2, h3'
-    ];
-    for (const sel of candidates) {
-      try {
-        const el = document.querySelector(sel);
-        if (el && el.textContent && el.textContent.trim().length > 0) {
-          const txt = el.textContent.trim();
-          if (txt.length >= 2 && txt.length <= 64) return txt;
-        }
-      } catch (e) {}
-    }
-    // Fallback: try title
     if (document.title) {
-      const m = document.title.match(/Alpha\s*[-|•]\s*(.+)/i);
+      const m = document.title.split(/\|/gi);
       if (m) return m[1].trim();
     }
     return null;
