@@ -271,7 +271,8 @@
             contract: currentAlphaContract,
             timestamp: Date.now(),
             dryRun: dryRunEnabled,
-            usdtAmount: typeof usdtAmount === 'number' ? usdtAmount : null
+            usdtAmount: typeof usdtAmount === 'number' ? usdtAmount : null,
+            volumePoints: calculateAlphaVolumePoints(usdtAmount)
           });
         } catch (error) {
           console.error('AlphaRoller: Error clicking commit button:', error);
@@ -396,7 +397,19 @@
   let priceObserver = null;
   let sidePanelPollTimer = null;
   let sidePanelEnabled = true;
-  let usdtAmount = null; // user-entered amount for transaction
+  let usdtAmount = 100; // default user-entered amount for transaction
+  let operationLogs = []; // recent buy/sell logs, latest first
+  
+  function calculateAlphaVolumePoints(amountUsd) {
+    if (typeof amountUsd !== 'number' || !isFinite(amountUsd) || amountUsd < 2) return 0;
+    return Math.floor(Math.log2(amountUsd / 2)) + 1;
+  }
+
+  function calculateTransactionsNeeded(targetPoints, amountUsd) {
+    const perTx = calculateAlphaVolumePoints(amountUsd);
+    if (perTx <= 0) return null; // not achievable with current amount
+    return Math.ceil(targetPoints / perTx);
+  }
 
   function ensureSidePanel() {
     if (!sidePanelEnabled) return;
@@ -450,13 +463,15 @@
       'font-size: 12px',
       'box-shadow: 0 2px 6px rgba(240, 185, 11, 0.35)'
     ].join(';'));
-    startBtn.addEventListener('click', () => {
+    startBtn.addEventListener('click', async () => {
       if (startBtn.disabled) return;
       const prevText = startBtn.textContent;
       startBtn.textContent = 'Processing...';
       startBtn.disabled = true;
       try {
-        attemptCommitTransaction();
+        await startRoundTripTransaction();
+      } catch (e) {
+        console.error('AlphaRoller: Round-trip transaction error', e);
       } finally {
         setTimeout(() => {
           startBtn.textContent = prevText;
@@ -530,6 +545,8 @@
       'font-size: 14px',
       'outline: none'
     ].join(';'));
+    // Set default visible value
+    amountInput.value = String(usdtAmount);
     amountInput.addEventListener('input', () => {
       const val = parseFloat(amountInput.value);
       if (!isNaN(val) && val >= 0) {
@@ -542,14 +559,47 @@
       if (typeof res.usdtAmount === 'number' && res.usdtAmount >= 0) {
         usdtAmount = res.usdtAmount;
         amountInput.value = String(res.usdtAmount);
+      } else {
+        // Persist default if not present
+        chrome.storage.local.set({ usdtAmount });
       }
     });
     amountRow.appendChild(amountLabel);
     amountRow.appendChild(amountInput);
 
+
     body.appendChild(symbolRow);
     body.appendChild(priceRow);
     body.appendChild(amountRow);
+    
+
+    // Operation logs (latest at top)
+    const logWrap = document.createElement('div');
+    logWrap.setAttribute('style', 'margin-top: 12px; display:flex; flex-direction:column; gap: 8px;');
+    const logTitle = document.createElement('div');
+    logTitle.textContent = 'Operation Log';
+    logTitle.setAttribute('style', 'opacity:0.7; font-size:12px;');
+    const logList = document.createElement('div');
+    logList.id = 'alpharoller-log';
+    logList.setAttribute('style', [
+      'display:flex',
+      'flex-direction:column',
+      'gap:6px',
+      'max-height:200px',
+      'overflow:auto',
+      'border-top:1px solid rgba(255,255,255,0.08)',
+      'padding-top:8px'
+    ].join(';'));
+    logWrap.appendChild(logTitle);
+    logWrap.appendChild(logList);
+    body.appendChild(logWrap);
+    // Load logs from storage and render
+    chrome.storage.local.get(['operationLogs'], (res) => {
+      if (Array.isArray(res.operationLogs)) {
+        operationLogs = res.operationLogs;
+        renderOperationLogs();
+      }
+    });
 
     sidePanel.appendChild(header);
     sidePanel.appendChild(body);
@@ -624,7 +674,7 @@
   function detectSymbolName() {
     if (document.title) {
       const m = document.title.split(/\|/gi);
-      if (m) return m[1].trim();
+      if (m) return m[1].trim().split(' ')[0];
     }
     return null;
   }
@@ -663,6 +713,188 @@
     // Common price formats: 123.45, $123.45, 0.000123, 1,234.56
     const cleaned = text.replace(/[,\s]/g, '');
     return /^(\$)?\d*(?:\.|\,)??\d{1,8}$/.test(cleaned) || /^(\$)?\d+$/i.test(cleaned);
+  }
+
+  // Removed side panel points and estimation UI
+
+  function addOperationLog(entry) {
+    // Prepend and cap length
+    operationLogs.unshift(entry);
+    if (operationLogs.length > 100) operationLogs.pop();
+    chrome.storage.local.set({ operationLogs });
+    renderOperationLogs();
+  }
+
+  function renderOperationLogs() {
+    const list = document.getElementById('alpharoller-log');
+    if (!list) return;
+    list.innerHTML = operationLogs.map(item => {
+      const ts = new Date(item.timestamp).toLocaleTimeString();
+      const priceStr = typeof item.price === 'number' ? item.price.toPrecision(6) : '-';
+      const qtyStr = typeof item.quantity === 'number' ? item.quantity.toFixed(8) : '-';
+      return `<div style="display:flex; justify-content:space-between; gap:8px;">
+        <div style="opacity:.7; font-size:12px; min-width:62px;">${ts}</div>
+        <div style="font-size:12px; font-weight:700; min-width:36px;">${item.type.toUpperCase()}</div>
+        <div style="font-size:12px;">Price: ${priceStr}</div>
+        <div style="font-size:12px;">Qty: ${qtyStr}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // =========================
+  // Round-trip transaction: Buy then Sell
+  // =========================
+  function getRealTimePrice() {
+    const priceEl = detectPriceElement();
+    if (!priceEl) return null;
+    const raw = (priceEl.textContent || '').trim().replace(/[,\s$]/g, '');
+    const price = parseFloat(raw);
+    return isFinite(price) && price > 0 ? price : null;
+  }
+
+  function findTradeInputs() {
+    // Heuristics to locate amount/quantity inputs on Binance Alpha page
+    const inputSelectors = [
+      'input[placeholder*="Amount" i]',
+      'input[placeholder*="USDT" i]',
+      'input[inputmode="decimal"]',
+      'input[type="number"]'
+    ];
+    const buttonSelectors = [
+      'button:contains("Buy")',
+      'button:contains("Sell")',
+      'button[class*="buy" i]',
+      'button[class*="sell" i]',
+      'button[data-testid*="buy" i]',
+      'button[data-testid*="sell" i]'
+    ];
+
+    const inputs = [];
+    inputSelectors.forEach(sel => {
+      if (sel.includes(':contains(')) return; // skip contains here for inputs
+      document.querySelectorAll(sel).forEach(el => inputs.push(el));
+    });
+
+    const buttons = [];
+    buttonSelectors.forEach(sel => {
+      if (sel.includes(':contains(')) {
+        const textMatch = sel.match(/:contains\("([^"]+)"\)/);
+        if (textMatch) {
+          const searchText = textMatch[1].toLowerCase();
+          const baseSelector = sel.split(':contains')[0];
+          document.querySelectorAll(baseSelector).forEach(el => {
+            const txt = (el.textContent || '').toLowerCase();
+            if (txt.includes(searchText)) buttons.push(el);
+          });
+        }
+      } else {
+        document.querySelectorAll(sel).forEach(el => buttons.push(el));
+      }
+    });
+
+    const buyButton = buttons.find(b => /buy/i.test(b.textContent || '') && isElementVisible(b));
+    const sellButton = buttons.find(b => /sell/i.test(b.textContent || '') && isElementVisible(b));
+
+    return { inputs, buyButton, sellButton };
+  }
+
+  async function fillInput(element, value) {
+    if (!element) return;
+    const valStr = String(value);
+    element.focus();
+    element.value = '';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.value = valStr;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function clickElement(el) {
+    if (!el) return;
+    if (el.click) el.click();
+    else if (el.dispatchEvent) {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+      el.dispatchEvent(event);
+    }
+  }
+
+  async function startRoundTripTransaction() {
+    if (!currentAlphaContract) {
+      console.warn('AlphaRoller: Not on an Alpha contract page.');
+      return;
+    }
+    const price = getRealTimePrice();
+    if (!price) {
+      console.warn('AlphaRoller: Unable to read real-time price.');
+      return;
+    }
+    const amountUsd = typeof usdtAmount === 'number' ? usdtAmount : 0;
+    if (amountUsd <= 0) {
+      console.warn('AlphaRoller: Invalid USDT amount.');
+      return;
+    }
+
+    const quantity = amountUsd / price;
+
+    chrome.runtime.sendMessage({
+      action: 'transactionStarted',
+      contract: currentAlphaContract,
+      price,
+      usdtAmount: amountUsd,
+      quantity,
+      dryRun: dryRunEnabled,
+      timestamp: Date.now()
+    });
+
+    const { inputs, buyButton, sellButton } = findTradeInputs();
+
+    // Try to find a USDT amount input; fallback to first numeric input
+    const amountInput = inputs.find(i => /usdt/i.test(i.placeholder || '')) || inputs[0];
+
+    // BUY
+    if (!dryRunEnabled) {
+      await fillInput(amountInput, amountUsd);
+      await new Promise(r => setTimeout(r, 200));
+      clickElement(buyButton);
+    } else {
+      console.log(`AlphaRoller [DRY RUN]: Buy ${quantity} with ${amountUsd} USDT at ${price}`);
+    }
+
+    chrome.runtime.sendMessage({
+      action: 'buyPlaced',
+      contract: currentAlphaContract,
+      price,
+      usdtAmount: amountUsd,
+      quantity,
+      dryRun: dryRunEnabled,
+      timestamp: Date.now()
+    });
+    addOperationLog({ type: 'buy', price, quantity, timestamp: Date.now() });
+
+    // Wait briefly to simulate/allow order execution
+    await new Promise(r => setTimeout(r, 1200));
+
+    // SELL the bought quantity
+    const qtyInput = inputs.find(i => /qty|quantity|amount/i.test(i.placeholder || '')) || inputs[0];
+    if (!dryRunEnabled) {
+      await fillInput(qtyInput, quantity);
+      await new Promise(r => setTimeout(r, 200));
+      clickElement(sellButton);
+    } else {
+      console.log(`AlphaRoller [DRY RUN]: Sell ${quantity} at ~${getRealTimePrice() || price}`);
+    }
+
+    const sellPrice = getRealTimePrice() || price;
+    chrome.runtime.sendMessage({
+      action: 'sellPlaced',
+      contract: currentAlphaContract,
+      price: sellPrice,
+      usdtAmount: amountUsd,
+      quantity,
+      dryRun: dryRunEnabled,
+      timestamp: Date.now()
+    });
+    addOperationLog({ type: 'sell', price: sellPrice, quantity, timestamp: Date.now() });
   }
 
   // Load sidePanelEnabled from storage at startup
