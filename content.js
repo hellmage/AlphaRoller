@@ -270,7 +270,8 @@
             action: 'transactionAttempted',
             contract: currentAlphaContract,
             timestamp: Date.now(),
-            dryRun: dryRunEnabled
+            dryRun: dryRunEnabled,
+            usdtAmount: typeof usdtAmount === 'number' ? usdtAmount : null
           });
         } catch (error) {
           console.error('AlphaRoller: Error clicking commit button:', error);
@@ -395,6 +396,7 @@
   let priceObserver = null;
   let sidePanelPollTimer = null;
   let sidePanelEnabled = true;
+  let usdtAmount = null; // user-entered amount for transaction
 
   function ensureSidePanel() {
     if (!sidePanelEnabled) return;
@@ -430,6 +432,39 @@
     const title = document.createElement('div');
     title.textContent = 'AlphaRoller';
     title.setAttribute('style', 'font-weight: 700; letter-spacing: .3px;');
+    
+    // Actions container (Start + Close)
+    const actions = document.createElement('div');
+    actions.setAttribute('style', 'display:flex; gap:8px; align-items:center;');
+
+    const startBtn = document.createElement('button');
+    startBtn.textContent = 'Start Transactions';
+    startBtn.setAttribute('style', [
+      'background: linear-gradient(135deg, #f0b90b 0%, #d4a008 100%)',
+      'border: none',
+      'color: #000',
+      'font-weight: 700',
+      'padding: 6px 10px',
+      'border-radius: 6px',
+      'cursor: pointer',
+      'font-size: 12px',
+      'box-shadow: 0 2px 6px rgba(240, 185, 11, 0.35)'
+    ].join(';'));
+    startBtn.addEventListener('click', () => {
+      if (startBtn.disabled) return;
+      const prevText = startBtn.textContent;
+      startBtn.textContent = 'Processing...';
+      startBtn.disabled = true;
+      try {
+        attemptCommitTransaction();
+      } finally {
+        setTimeout(() => {
+          startBtn.textContent = prevText;
+          startBtn.disabled = false;
+        }, 1500);
+      }
+    });
+
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '×';
     closeBtn.setAttribute('aria-label', 'Close');
@@ -442,7 +477,9 @@
     ].join(';'));
     closeBtn.addEventListener('click', removeSidePanel);
     header.appendChild(title);
-    header.appendChild(closeBtn);
+    actions.appendChild(startBtn);
+    actions.appendChild(closeBtn);
+    header.appendChild(actions);
 
     const body = document.createElement('div');
     body.setAttribute('style', 'padding: 14px; display: flex; flex-direction: column; gap: 12px;');
@@ -471,8 +508,48 @@
     priceRow.appendChild(priceLabel);
     priceRow.appendChild(priceValue);
 
+    // Amount input (USDT)
+    const amountRow = document.createElement('div');
+    amountRow.setAttribute('style', 'display:flex; flex-direction: column; gap: 6px;');
+    const amountLabel = document.createElement('label');
+    amountLabel.setAttribute('for', 'alpharoller-amount');
+    amountLabel.textContent = 'Amount (USDT)';
+    amountLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
+    const amountInput = document.createElement('input');
+    amountInput.id = 'alpharoller-amount';
+    amountInput.type = 'number';
+    amountInput.min = '0';
+    amountInput.step = '0.01';
+    amountInput.placeholder = 'e.g. 100.00';
+    amountInput.setAttribute('style', [
+      'padding: 8px 10px',
+      'border-radius: 6px',
+      'border: 1px solid rgba(255,255,255,0.12)',
+      'background: #1e2329',
+      'color: #eaecef',
+      'font-size: 14px',
+      'outline: none'
+    ].join(';'));
+    amountInput.addEventListener('input', () => {
+      const val = parseFloat(amountInput.value);
+      if (!isNaN(val) && val >= 0) {
+        usdtAmount = val;
+        chrome.storage.local.set({ usdtAmount: val });
+      }
+    });
+    // Load saved value
+    chrome.storage.local.get(['usdtAmount'], (res) => {
+      if (typeof res.usdtAmount === 'number' && res.usdtAmount >= 0) {
+        usdtAmount = res.usdtAmount;
+        amountInput.value = String(res.usdtAmount);
+      }
+    });
+    amountRow.appendChild(amountLabel);
+    amountRow.appendChild(amountInput);
+
     body.appendChild(symbolRow);
     body.appendChild(priceRow);
+    body.appendChild(amountRow);
 
     sidePanel.appendChild(header);
     sidePanel.appendChild(body);
