@@ -399,6 +399,7 @@
   let sidePanelEnabled = true;
   let usdtAmount = 100; // default user-entered amount for transaction
   let operationLogs = []; // recent buy/sell logs, latest first
+  let sidePanelWidth = 300; // px, resizable
   
   function calculateAlphaVolumePoints(amountUsd) {
     if (typeof amountUsd !== 'number' || !isFinite(amountUsd) || amountUsd < 2) return 0;
@@ -423,7 +424,7 @@
       'top: 0',
       'right: 0',
       'height: 100vh',
-      'width: 300px',
+      `width: ${sidePanelWidth}px`,
       'z-index: 2147483647',
       'background: #0b0e11',
       'color: #eaecef',
@@ -431,8 +432,23 @@
       'border-left: 1px solid rgba(255,255,255,0.08)',
       'display: flex',
       'flex-direction: column',
-      'font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+      'font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+      'box-sizing: border-box',
+      'position: fixed'
     ].join(';'));
+
+    // Resizer (left edge)
+    const resizer = document.createElement('div');
+    resizer.setAttribute('style', [
+      'position: absolute',
+      'left: -4px',
+      'top: 0',
+      'width: 8px',
+      'height: 100%',
+      'cursor: col-resize',
+      'z-index: 2147483648'
+    ].join(';'));
+    sidePanel.appendChild(resizer);
 
     const header = document.createElement('div');
     header.setAttribute('style', [
@@ -492,7 +508,24 @@
     ].join(';'));
     closeBtn.addEventListener('click', removeSidePanel);
     header.appendChild(title);
+    // Clear logs button
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear Logs';
+    clearBtn.setAttribute('style', [
+      'background: transparent',
+      'border: 1px solid rgba(255,255,255,0.2)',
+      'color: #eaecef',
+      'padding: 6px 10px',
+      'border-radius: 6px',
+      'cursor: pointer',
+      'font-size: 12px'
+    ].join(';'));
+    clearBtn.addEventListener('click', () => {
+      clearTransactionLogs();
+    });
+
     actions.appendChild(startBtn);
+    actions.appendChild(clearBtn);
     actions.appendChild(closeBtn);
     header.appendChild(actions);
 
@@ -605,6 +638,9 @@
     sidePanel.appendChild(body);
 
     document.body.appendChild(sidePanel);
+
+    // Attach resize handlers
+    attachSidePanelResizer(sidePanel);
   }
 
   function removeSidePanel() {
@@ -621,6 +657,39 @@
     }
     sidePanel = null;
     sidePanelPriceEl = null;
+  }
+
+  function attachSidePanelResizer(panel) {
+    const resizer = panel.firstChild; // the resizer div
+    if (!resizer) return;
+
+    let startX = 0;
+    let startWidth = sidePanelWidth;
+    const minWidth = 220;
+    const maxWidth = 640;
+
+    function onMouseMove(e) {
+      const delta = startX - e.clientX; // dragging left increases width
+      let newWidth = startWidth + delta;
+      if (newWidth < minWidth) newWidth = minWidth;
+      if (newWidth > maxWidth) newWidth = maxWidth;
+      sidePanelWidth = newWidth;
+      panel.style.width = `${newWidth}px`;
+    }
+
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      chrome.storage.local.set({ sidePanelWidth });
+    }
+
+    resizer.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = panel.getBoundingClientRect().width;
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
   }
 
   function syncSidePanelWithPage() {
@@ -732,13 +801,23 @@
       const ts = new Date(item.timestamp).toLocaleTimeString();
       const priceStr = typeof item.price === 'number' ? item.price.toPrecision(6) : '-';
       const qtyStr = typeof item.quantity === 'number' ? item.quantity.toFixed(8) : '-';
+      const fromSym = item.fromSymbol || '-';
+      const toSym = item.toSymbol || '-';
       return `<div style="display:flex; justify-content:space-between; gap:8px;">
         <div style="opacity:.7; font-size:12px; min-width:62px;">${ts}</div>
         <div style="font-size:12px; font-weight:700; min-width:36px;">${item.type.toUpperCase()}</div>
+        <div style="font-size:12px;">${fromSym} → ${toSym}</div>
         <div style="font-size:12px;">Price: ${priceStr}</div>
         <div style="font-size:12px;">Qty: ${qtyStr}</div>
       </div>`;
     }).join('');
+  }
+
+  function clearTransactionLogs() {
+    operationLogs = [];
+    chrome.storage.local.remove(['operationLogs', 'transactionLog'], () => {
+      renderOperationLogs();
+    });
   }
 
   // =========================
@@ -851,6 +930,14 @@
     // Try to find a USDT amount input; fallback to first numeric input
     const amountInput = inputs.find(i => /usdt/i.test(i.placeholder || '')) || inputs[0];
 
+    // Determine symbols
+    const baseSymbol = (function() {
+      const el = document.getElementById('alpharoller-symbol');
+      const txt = el && el.textContent ? el.textContent.trim() : null;
+      return (txt && txt.length > 0) ? txt : (detectSymbolName() || 'TOKEN');
+    })();
+    const quoteSymbol = 'USDT';
+
     // BUY
     if (!dryRunEnabled) {
       await fillInput(amountInput, amountUsd);
@@ -869,7 +956,7 @@
       dryRun: dryRunEnabled,
       timestamp: Date.now()
     });
-    addOperationLog({ type: 'buy', price, quantity, timestamp: Date.now() });
+    addOperationLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol });
 
     // Wait briefly to simulate/allow order execution
     await new Promise(r => setTimeout(r, 1200));
@@ -894,12 +981,15 @@
       dryRun: dryRunEnabled,
       timestamp: Date.now()
     });
-    addOperationLog({ type: 'sell', price: sellPrice, quantity, timestamp: Date.now() });
+    addOperationLog({ type: 'sell', price: sellPrice, quantity, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol });
   }
 
   // Load sidePanelEnabled from storage at startup
-  chrome.storage.local.get(['sidePanelEnabled'], (res) => {
+  chrome.storage.local.get(['sidePanelEnabled', 'sidePanelWidth'], (res) => {
     if (res.sidePanelEnabled !== undefined) sidePanelEnabled = !!res.sidePanelEnabled;
+    if (typeof res.sidePanelWidth === 'number' && res.sidePanelWidth >= 200 && res.sidePanelWidth <= 1000) {
+      sidePanelWidth = res.sidePanelWidth;
+    }
   });
 
   // Extend message handler for panel toggling
