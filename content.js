@@ -925,10 +925,11 @@
       timestamp: Date.now()
     });
 
-    const { inputs, buyButton, sellButton } = findTradeInputs();
+    const { buyButton, sellButton } = findTradeInputs();
 
-    // Try to find a USDT amount input; fallback to first numeric input
-    const amountInput = inputs.find(i => /usdt/i.test(i.placeholder || '')) || inputs[0];
+    // Find limit order inputs by ID
+    const limitPriceInput = document.getElementById('limitPrice');
+    const limitTotalInput = document.getElementById('limitTotal');
 
     // Determine symbols
     const baseSymbol = (function() {
@@ -938,13 +939,19 @@
     })();
     const quoteSymbol = 'USDT';
 
-    // BUY
+    // BUY - Limit Order
     if (!dryRunEnabled) {
-      await fillInput(amountInput, amountUsd);
-      await new Promise(r => setTimeout(r, 200));
-      clickElement(buyButton);
+      if (limitPriceInput && limitTotalInput) {
+        await fillInput(limitPriceInput, price);
+        await new Promise(r => setTimeout(r, 100));
+        await fillInput(limitTotalInput, amountUsd);
+        await new Promise(r => setTimeout(r, 200));
+        clickElement(buyButton);
+      } else {
+        console.warn('AlphaRoller: Limit order inputs not found (limitPrice, limitTotal)');
+      }
     } else {
-      console.log(`AlphaRoller [DRY RUN]: Buy ${quantity} with ${amountUsd} USDT at ${price}`);
+      console.log(`AlphaRoller [DRY RUN]: Limit Buy - Price: ${price}, Total: ${amountUsd} USDT`);
     }
 
     chrome.runtime.sendMessage({
@@ -961,17 +968,31 @@
     // Wait briefly to simulate/allow order execution
     await new Promise(r => setTimeout(r, 1200));
 
-    // SELL the bought quantity
-    const qtyInput = inputs.find(i => /qty|quantity|amount/i.test(i.placeholder || '')) || inputs[0];
-    if (!dryRunEnabled) {
-      await fillInput(qtyInput, quantity);
-      await new Promise(r => setTimeout(r, 200));
-      clickElement(sellButton);
-    } else {
-      console.log(`AlphaRoller [DRY RUN]: Sell ${quantity} at ~${getRealTimePrice() || price}`);
-    }
-
+    // SELL - Limit Order (use same price input, find quantity input)
     const sellPrice = getRealTimePrice() || price;
+    const limitSellPriceInput = document.getElementById('limitPrice'); // May reuse same input
+    const limitQuantityInput = document.getElementById('limitQuantity') || 
+                               document.getElementById('limitTotal'); // Try quantity or total
+    
+    if (!dryRunEnabled) {
+      if (limitSellPriceInput) {
+        await fillInput(limitSellPriceInput, sellPrice);
+        await new Promise(r => setTimeout(r, 100));
+        if (limitQuantityInput) {
+          await fillInput(limitQuantityInput, quantity);
+        } else {
+          // Fallback: try to find quantity input by other means
+          const qtyInput = document.querySelector('input[placeholder*="quantity" i], input[placeholder*="amount" i]');
+          if (qtyInput) await fillInput(qtyInput, quantity);
+        }
+        await new Promise(r => setTimeout(r, 200));
+        clickElement(sellButton);
+      } else {
+        console.warn('AlphaRoller: Limit sell price input not found');
+      }
+    } else {
+      console.log(`AlphaRoller [DRY RUN]: Limit Sell - Price: ${sellPrice}, Quantity: ${quantity}`);
+    }
     chrome.runtime.sendMessage({
       action: 'sellPlaced',
       contract: currentAlphaContract,
