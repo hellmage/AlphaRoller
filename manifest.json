@@ -36,7 +36,7 @@
         "https://www.binance.com/*",
         "https://binance.com/*"
       ],
-      "js": ["sidepanel.js", "content.js"],
+      "js": ["sidepanel.js", "transactions.js", "content.js"],
       "run_at": "document_idle"
     }
   ]
