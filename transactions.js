@@ -33,6 +33,8 @@
       'input[type="number"]'
     ];
     const buttonSelectors = [
+      '.bn-button__buy',
+      '.bn-button__sell',
       'button:contains("Buy")',
       'button:contains("Sell")',
       'button[class*="buy" i]',
@@ -65,8 +67,9 @@
     });
 
     const isVisible = externalAPI.isElementVisible || (() => true);
-    const buyButton = buttons.find(b => /buy/i.test(b.textContent || '') && isVisible(b));
-    const sellButton = buttons.find(b => /sell/i.test(b.textContent || '') && isVisible(b));
+    // Prefer the explicit Binance buy class if present
+    const buyButton = document.querySelector('.bn-button__buy') || buttons.find(b => /buy/i.test(b.textContent || '') && isVisible(b));
+    const sellButton = document.querySelector('.bn-button__sell') || buttons.find(b => /sell/i.test(b.textContent || '') && isVisible(b));
 
     return { inputs, buyButton, sellButton };
   }
