@@ -94,8 +94,10 @@
       });
 
       // Ensure side panel is visible and synced
-      ensureSidePanel();
-      syncSidePanelWithPage();
+      if (window.AlphaRollerSidePanel) {
+        window.AlphaRollerSidePanel.ensure();
+        window.AlphaRollerSidePanel.sync();
+      }
 
       // If auto-trading is enabled, attempt to commit transaction
       if (autoTradingEnabled) {
@@ -106,7 +108,9 @@
       }
     } else {
       currentAlphaContract = null;
-      removeSidePanel();
+      if (window.AlphaRollerSidePanel) {
+        window.AlphaRollerSidePanel.remove();
+      }
       chrome.storage.local.remove('currentAlpha');
     }
   }
@@ -390,355 +394,12 @@
   }
 
   // =========================
-  // Side Panel (Alpha Info)
+  // Side Panel - moved to sidepanel.js
   // =========================
-  let sidePanel = null;
-  let sidePanelPriceEl = null;
-  let priceObserver = null;
-  let sidePanelPollTimer = null;
-  let sidePanelEnabled = true;
-  let usdtAmount = 100; // default user-entered amount for transaction
-  let operationLogs = []; // recent buy/sell logs, latest first
-  let sidePanelWidth = 300; // px, resizable
-  
-  function calculateAlphaVolumePoints(amountUsd) {
-    if (typeof amountUsd !== 'number' || !isFinite(amountUsd) || amountUsd < 2) return 0;
-    return Math.floor(Math.log2(amountUsd / 2)) + 1;
-  }
+  // Side panel functionality is now in sidepanel.js
+  // Access via window.AlphaRollerSidePanel API
 
-  function calculateTransactionsNeeded(targetPoints, amountUsd) {
-    const perTx = calculateAlphaVolumePoints(amountUsd);
-    if (perTx <= 0) return null; // not achievable with current amount
-    return Math.ceil(targetPoints / perTx);
-  }
-
-  function ensureSidePanel() {
-    if (!sidePanelEnabled) return;
-    if (sidePanel && document.body.contains(sidePanel)) return;
-
-    // Create container
-    sidePanel = document.createElement('div');
-    sidePanel.id = 'alpharoller-side-panel';
-    sidePanel.setAttribute('style', [
-      'position: fixed',
-      'top: 0',
-      'right: 0',
-      'height: 100vh',
-      `width: ${sidePanelWidth}px`,
-      'z-index: 2147483647',
-      'background: #0b0e11',
-      'color: #eaecef',
-      'box-shadow: -2px 0 12px rgba(0,0,0,0.4)',
-      'border-left: 1px solid rgba(255,255,255,0.08)',
-      'display: flex',
-      'flex-direction: column',
-      'font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
-      'box-sizing: border-box',
-      'position: fixed'
-    ].join(';'));
-
-    // Resizer (left edge)
-    const resizer = document.createElement('div');
-    resizer.setAttribute('style', [
-      'position: absolute',
-      'left: -4px',
-      'top: 0',
-      'width: 8px',
-      'height: 100%',
-      'cursor: col-resize',
-      'z-index: 2147483648'
-    ].join(';'));
-    sidePanel.appendChild(resizer);
-
-    const header = document.createElement('div');
-    header.setAttribute('style', [
-      'padding: 12px 14px',
-      'display: flex',
-      'align-items: center',
-      'justify-content: space-between',
-      'border-bottom: 1px solid rgba(255,255,255,0.08)'
-    ].join(';'));
-    const title = document.createElement('div');
-    title.textContent = 'AlphaRoller';
-    title.setAttribute('style', 'font-weight: 700; letter-spacing: .3px;');
-    
-    // Actions container (Start + Close)
-    const actions = document.createElement('div');
-    actions.setAttribute('style', 'display:flex; gap:8px; align-items:center;');
-
-    const startBtn = document.createElement('button');
-    startBtn.textContent = 'Start Transactions';
-    startBtn.setAttribute('style', [
-      'background: linear-gradient(135deg, #f0b90b 0%, #d4a008 100%)',
-      'border: none',
-      'color: #000',
-      'font-weight: 700',
-      'padding: 6px 10px',
-      'border-radius: 6px',
-      'cursor: pointer',
-      'font-size: 12px',
-      'box-shadow: 0 2px 6px rgba(240, 185, 11, 0.35)'
-    ].join(';'));
-    startBtn.addEventListener('click', async () => {
-      if (startBtn.disabled) return;
-      const prevText = startBtn.textContent;
-      startBtn.textContent = 'Processing...';
-      startBtn.disabled = true;
-      try {
-        await startRoundTripTransaction();
-      } catch (e) {
-        console.error('AlphaRoller: Round-trip transaction error', e);
-      } finally {
-        setTimeout(() => {
-          startBtn.textContent = prevText;
-          startBtn.disabled = false;
-        }, 1500);
-      }
-    });
-
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '×';
-    closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.setAttribute('style', [
-      'background: transparent',
-      'border: none',
-      'color: #eaecef',
-      'font-size: 20px',
-      'cursor: pointer'
-    ].join(';'));
-    closeBtn.addEventListener('click', removeSidePanel);
-    header.appendChild(title);
-    // Clear logs button
-    const clearBtn = document.createElement('button');
-    clearBtn.textContent = 'Clear Logs';
-    clearBtn.setAttribute('style', [
-      'background: transparent',
-      'border: 1px solid rgba(255,255,255,0.2)',
-      'color: #eaecef',
-      'padding: 6px 10px',
-      'border-radius: 6px',
-      'cursor: pointer',
-      'font-size: 12px'
-    ].join(';'));
-    clearBtn.addEventListener('click', () => {
-      clearTransactionLogs();
-    });
-
-    actions.appendChild(startBtn);
-    actions.appendChild(clearBtn);
-    actions.appendChild(closeBtn);
-    header.appendChild(actions);
-
-    const body = document.createElement('div');
-    body.setAttribute('style', 'padding: 14px; display: flex; flex-direction: column; gap: 12px;');
-
-    const symbolRow = document.createElement('div');
-    symbolRow.setAttribute('style', 'display: flex; flex-direction: column; gap: 6px;');
-    const symbolLabel = document.createElement('div');
-    symbolLabel.textContent = 'Symbol';
-    symbolLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
-    const symbolValue = document.createElement('div');
-    symbolValue.id = 'alpharoller-symbol';
-    symbolValue.textContent = '-';
-    symbolValue.setAttribute('style', 'font-size: 18px; font-weight: 700;');
-    symbolRow.appendChild(symbolLabel);
-    symbolRow.appendChild(symbolValue);
-
-    const priceRow = document.createElement('div');
-    priceRow.setAttribute('style', 'display: flex; flex-direction: column; gap: 6px;');
-    const priceLabel = document.createElement('div');
-    priceLabel.textContent = 'Price';
-    priceLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
-    const priceValue = document.createElement('div');
-    priceValue.id = 'alpharoller-price';
-    priceValue.textContent = '-';
-    priceValue.setAttribute('style', 'font-size: 22px; font-weight: 800; color: #f0b90b;');
-    priceRow.appendChild(priceLabel);
-    priceRow.appendChild(priceValue);
-
-    // Amount input (USDT)
-    const amountRow = document.createElement('div');
-    amountRow.setAttribute('style', 'display:flex; flex-direction: column; gap: 6px;');
-    const amountLabel = document.createElement('label');
-    amountLabel.setAttribute('for', 'alpharoller-amount');
-    amountLabel.textContent = 'Amount (USDT)';
-    amountLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
-    const amountInput = document.createElement('input');
-    amountInput.id = 'alpharoller-amount';
-    amountInput.type = 'number';
-    amountInput.min = '0';
-    amountInput.step = '0.01';
-    amountInput.placeholder = 'e.g. 100.00';
-    amountInput.setAttribute('style', [
-      'padding: 8px 10px',
-      'border-radius: 6px',
-      'border: 1px solid rgba(255,255,255,0.12)',
-      'background: #1e2329',
-      'color: #eaecef',
-      'font-size: 14px',
-      'outline: none'
-    ].join(';'));
-    // Set default visible value
-    amountInput.value = String(usdtAmount);
-    amountInput.addEventListener('input', () => {
-      const val = parseFloat(amountInput.value);
-      if (!isNaN(val) && val >= 0) {
-        usdtAmount = val;
-        chrome.storage.local.set({ usdtAmount: val });
-      }
-    });
-    // Load saved value
-    chrome.storage.local.get(['usdtAmount'], (res) => {
-      if (typeof res.usdtAmount === 'number' && res.usdtAmount >= 0) {
-        usdtAmount = res.usdtAmount;
-        amountInput.value = String(res.usdtAmount);
-      } else {
-        // Persist default if not present
-        chrome.storage.local.set({ usdtAmount });
-      }
-    });
-    amountRow.appendChild(amountLabel);
-    amountRow.appendChild(amountInput);
-
-
-    body.appendChild(symbolRow);
-    body.appendChild(priceRow);
-    body.appendChild(amountRow);
-    
-
-    // Operation logs (latest at top)
-    const logWrap = document.createElement('div');
-    logWrap.setAttribute('style', 'margin-top: 12px; display:flex; flex-direction:column; gap: 8px;');
-    const logTitle = document.createElement('div');
-    logTitle.textContent = 'Operation Log';
-    logTitle.setAttribute('style', 'opacity:0.7; font-size:12px;');
-    const logList = document.createElement('div');
-    logList.id = 'alpharoller-log';
-    logList.setAttribute('style', [
-      'display:flex',
-      'flex-direction:column',
-      'gap:6px',
-      'max-height:200px',
-      'overflow:auto',
-      'border-top:1px solid rgba(255,255,255,0.08)',
-      'padding-top:8px'
-    ].join(';'));
-    logWrap.appendChild(logTitle);
-    logWrap.appendChild(logList);
-    body.appendChild(logWrap);
-    // Load logs from storage and render
-    chrome.storage.local.get(['operationLogs'], (res) => {
-      if (Array.isArray(res.operationLogs)) {
-        operationLogs = res.operationLogs;
-        renderOperationLogs();
-      }
-    });
-
-    sidePanel.appendChild(header);
-    sidePanel.appendChild(body);
-
-    document.body.appendChild(sidePanel);
-
-    // Attach resize handlers
-    attachSidePanelResizer(sidePanel);
-  }
-
-  function removeSidePanel() {
-    if (priceObserver) {
-      try { priceObserver.disconnect(); } catch (e) {}
-      priceObserver = null;
-    }
-    if (sidePanelPollTimer) {
-      clearInterval(sidePanelPollTimer);
-      sidePanelPollTimer = null;
-    }
-    if (sidePanel && sidePanel.parentNode) {
-      sidePanel.parentNode.removeChild(sidePanel);
-    }
-    sidePanel = null;
-    sidePanelPriceEl = null;
-  }
-
-  function attachSidePanelResizer(panel) {
-    const resizer = panel.firstChild; // the resizer div
-    if (!resizer) return;
-
-    let startX = 0;
-    let startWidth = sidePanelWidth;
-    const minWidth = 220;
-    const maxWidth = 640;
-
-    function onMouseMove(e) {
-      const delta = startX - e.clientX; // dragging left increases width
-      let newWidth = startWidth + delta;
-      if (newWidth < minWidth) newWidth = minWidth;
-      if (newWidth > maxWidth) newWidth = maxWidth;
-      sidePanelWidth = newWidth;
-      panel.style.width = `${newWidth}px`;
-    }
-
-    function onMouseUp() {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      chrome.storage.local.set({ sidePanelWidth });
-    }
-
-    resizer.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      startX = e.clientX;
-      startWidth = panel.getBoundingClientRect().width;
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-    });
-  }
-
-  function syncSidePanelWithPage() {
-    if (!sidePanel || !sidePanelEnabled) return;
-    const symbolName = detectSymbolName() || (currentAlphaContract ? currentAlphaContract.address : '-');
-    const symbolEl = document.getElementById('alpharoller-symbol');
-    if (symbolEl) symbolEl.textContent = symbolName;
-
-    const priceEl = detectPriceElement();
-    const priceValueEl = document.getElementById('alpharoller-price');
-
-    if (priceEl && priceValueEl) {
-      sidePanelPriceEl = priceEl;
-      // Initial set
-      priceValueEl.textContent = (priceEl.textContent || '').trim();
-
-      // Observe mutations on the price element
-      if (priceObserver) {
-        try { priceObserver.disconnect(); } catch (e) {}
-      }
-      priceObserver = new MutationObserver(() => {
-        priceValueEl.textContent = (priceEl.textContent || '').trim();
-      });
-      priceObserver.observe(priceEl, { characterData: true, subtree: true, childList: true });
-
-      // Fallback polling in case Binance re-renders the node entirely
-      if (sidePanelPollTimer) clearInterval(sidePanelPollTimer);
-      sidePanelPollTimer = setInterval(() => {
-        if (!document.body.contains(priceEl)) {
-          // Re-detect
-          const newEl = detectPriceElement();
-          if (newEl) {
-            sidePanelPriceEl = newEl;
-            priceValueEl.textContent = (newEl.textContent || '').trim();
-            if (priceObserver) {
-              try { priceObserver.disconnect(); } catch (e) {}
-            }
-            priceObserver = new MutationObserver(() => {
-              priceValueEl.textContent = (newEl.textContent || '').trim();
-            });
-            priceObserver.observe(newEl, { characterData: true, subtree: true, childList: true });
-          }
-        } else {
-          // Keep in sync
-          priceValueEl.textContent = (priceEl.textContent || '').trim();
-        }
-      }, 1500);
-    }
-  }
+  // Side panel functions moved to sidepanel.js
 
   function detectSymbolName() {
     if (document.title) {
@@ -784,41 +445,7 @@
     return /^(\$)?\d*(?:\.|\,)??\d{1,8}$/.test(cleaned) || /^(\$)?\d+$/i.test(cleaned);
   }
 
-  // Removed side panel points and estimation UI
-
-  function addOperationLog(entry) {
-    // Prepend and cap length
-    operationLogs.unshift(entry);
-    if (operationLogs.length > 100) operationLogs.pop();
-    chrome.storage.local.set({ operationLogs });
-    renderOperationLogs();
-  }
-
-  function renderOperationLogs() {
-    const list = document.getElementById('alpharoller-log');
-    if (!list) return;
-    list.innerHTML = operationLogs.map(item => {
-      const ts = new Date(item.timestamp).toLocaleTimeString();
-      const priceStr = typeof item.price === 'number' ? item.price.toPrecision(6) : '-';
-      const qtyStr = typeof item.quantity === 'number' ? item.quantity.toFixed(8) : '-';
-      const fromSym = item.fromSymbol || '-';
-      const toSym = item.toSymbol || '-';
-      return `<div style="display:flex; justify-content:space-between; gap:8px;">
-        <div style="opacity:.7; font-size:12px; min-width:62px;">${ts}</div>
-        <div style="font-size:12px; font-weight:700; min-width:36px;">${item.type.toUpperCase()}</div>
-        <div style="font-size:12px;">${fromSym} → ${toSym}</div>
-        <div style="font-size:12px;">Price: ${priceStr}</div>
-        <div style="font-size:12px;">Qty: ${qtyStr}</div>
-      </div>`;
-    }).join('');
-  }
-
-  function clearTransactionLogs() {
-    operationLogs = [];
-    chrome.storage.local.remove(['operationLogs', 'transactionLog'], () => {
-      renderOperationLogs();
-    });
-  }
+  // Log functions moved to sidepanel.js
 
   // =========================
   // Round-trip transaction: Buy then Sell
@@ -907,7 +534,7 @@
       console.warn('AlphaRoller: Unable to read real-time price.');
       return;
     }
-    const amountUsd = typeof usdtAmount === 'number' ? usdtAmount : 0;
+    const amountUsd = window.AlphaRollerSidePanel ? window.AlphaRollerSidePanel.getUsdtAmount() : 0;
     if (amountUsd <= 0) {
       console.warn('AlphaRoller: Invalid USDT amount.');
       return;
@@ -963,7 +590,9 @@
       dryRun: dryRunEnabled,
       timestamp: Date.now()
     });
-    addOperationLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol });
+    if (window.AlphaRollerSidePanel) {
+      window.AlphaRollerSidePanel.addLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol });
+    }
 
     // Wait briefly to simulate/allow order execution
     await new Promise(r => setTimeout(r, 1200));
@@ -1002,40 +631,27 @@
       dryRun: dryRunEnabled,
       timestamp: Date.now()
     });
-    addOperationLog({ type: 'sell', price: sellPrice, quantity, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol });
-  }
-
-  // Load sidePanelEnabled from storage at startup
-  chrome.storage.local.get(['sidePanelEnabled', 'sidePanelWidth'], (res) => {
-    if (res.sidePanelEnabled !== undefined) sidePanelEnabled = !!res.sidePanelEnabled;
-    if (typeof res.sidePanelWidth === 'number' && res.sidePanelWidth >= 200 && res.sidePanelWidth <= 1000) {
-      sidePanelWidth = res.sidePanelWidth;
+    if (window.AlphaRollerSidePanel) {
+      window.AlphaRollerSidePanel.addLog({ type: 'sell', price: sellPrice, quantity, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol });
     }
-  });
+  }
 
   // Extend message handler for panel toggling
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request && request.action === 'toggleSidePanel') {
-      sidePanelEnabled = !sidePanelEnabled;
-      chrome.storage.local.set({ sidePanelEnabled });
-      if (sidePanelEnabled) {
-        ensureSidePanel();
-        syncSidePanelWithPage();
-      } else {
-        removeSidePanel();
+      if (window.AlphaRollerSidePanel) {
+        chrome.storage.local.get(['sidePanelEnabled'], (res) => {
+          const current = res.sidePanelEnabled !== undefined ? res.sidePanelEnabled : true;
+          window.AlphaRollerSidePanel.setEnabled(!current);
+          sendResponse && sendResponse({ enabled: !current });
+        });
       }
-      sendResponse && sendResponse({ enabled: sidePanelEnabled });
       return true;
     } else if (request && request.action === 'setSidePanel') {
-      sidePanelEnabled = !!request.enabled;
-      chrome.storage.local.set({ sidePanelEnabled });
-      if (sidePanelEnabled) {
-        ensureSidePanel();
-        syncSidePanelWithPage();
-      } else {
-        removeSidePanel();
+      if (window.AlphaRollerSidePanel) {
+        window.AlphaRollerSidePanel.setEnabled(!!request.enabled);
+        sendResponse && sendResponse({ enabled: !!request.enabled });
       }
-      sendResponse && sendResponse({ enabled: sidePanelEnabled });
       return true;
     }
   });
@@ -1102,6 +718,17 @@
   // Utility function to check if text contains alpha symbols
   function isAlphaSymbol(text) {
     return /^[A-Z]{2,10}/.test(text) && !/^[0-9]/.test(text);
+  }
+
+  // Register API with sidepanel module (after all functions are defined)
+  if (window.AlphaRollerSidePanel) {
+    window.AlphaRollerSidePanel.setAPI({
+      startRoundTripTransaction: startRoundTripTransaction,
+      detectSymbolName: detectSymbolName,
+      detectPriceElement: detectPriceElement,
+      getCurrentAlphaContract: () => currentAlphaContract,
+      isElementVisible: isElementVisible
+    });
   }
 
 })();
