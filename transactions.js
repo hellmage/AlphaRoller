@@ -270,19 +270,36 @@
     // SELL - Limit Order (use same price input, find quantity input)
     const sellPrice = getRealTimePrice() || price;
     const limitSellPriceInput = document.getElementById('limitPrice'); // May reuse same input
+    // Prefer Binance-specific amount input for SELL
+    const limitAmountInput = document.getElementById('limitAmount');
     const limitQuantityInput = document.getElementById('limitQuantity') || 
-                               document.getElementById('limitTotal'); // Try quantity or total
+                               document.getElementById('limitTotal'); // Fallbacks
+
+    // Read the actual available quantity from holdings summary element if present
+    let sellQty = quantity;
+    try {
+      const qtyTextEl = document.querySelector('.text-TertiaryText > .items-center > .text-PrimaryText');
+      if (qtyTextEl && qtyTextEl.textContent) {
+        const rawQty = qtyTextEl.textContent.trim().replace(/[,\s]/g, '');
+        const parsedQty = parseFloat(rawQty);
+        if (isFinite(parsedQty) && parsedQty > 0) {
+          sellQty = parsedQty;
+        }
+      }
+    } catch (_) {}
     
     if (!dryRun) {
       if (limitSellPriceInput) {
         await fillInput(limitSellPriceInput, sellPrice);
         await new Promise(r => setTimeout(r, 100));
-        if (limitQuantityInput) {
-          await fillInput(limitQuantityInput, quantity);
+        // Prefer #limitAmount if available, otherwise fallback to other inputs
+        if (limitAmountInput) {
+          await fillInput(limitAmountInput, sellQty);
+        } else if (limitQuantityInput) {
+          await fillInput(limitQuantityInput, sellQty);
         } else {
-          // Fallback: try to find quantity input by other means
           const qtyInput = document.querySelector('input[placeholder*="quantity" i], input[placeholder*="amount" i]');
-          if (qtyInput) await fillInput(qtyInput, quantity);
+          if (qtyInput) await fillInput(qtyInput, sellQty);
         }
         await new Promise(r => setTimeout(r, 200));
         clickElement(sellButton);
@@ -290,19 +307,19 @@
         console.warn('AlphaRoller: Limit sell price input not found');
       }
     } else {
-      console.log(`AlphaRoller [DRY RUN]: Limit Sell - Price: ${sellPrice}, Quantity: ${quantity}`);
+      console.log(`AlphaRoller [DRY RUN]: Limit Sell - Price: ${sellPrice}, Quantity: ${sellQty}`);
     }
     chrome.runtime.sendMessage({
       action: 'sellPlaced',
       contract: contract,
       price: sellPrice,
       usdtAmount: amountUsd,
-      quantity,
+      quantity: sellQty,
       dryRun: dryRun,
       timestamp: Date.now()
     });
     if (sidePanel) {
-      sidePanel.addLog({ type: 'sell', price: sellPrice, quantity, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol });
+      sidePanel.addLog({ type: 'sell', price: sellPrice, quantity: sellQty, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol });
     }
   }
 
