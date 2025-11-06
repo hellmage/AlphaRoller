@@ -226,6 +226,14 @@
     })();
     const quoteSymbol = 'USDT';
 
+    // Activate the Buy tab before placing the order
+    const buyTab = document.querySelector(".bn-tabs__buySell #bn-tab-0");
+    if (buyTab) {
+      console.log('AlphaRoller: activate buy tab');
+      clickElement(buyTab);
+      await new Promise(r => setTimeout(r, 120));
+    }
+
     // BUY - Limit Order (temporarily disabled if BUY_ENABLED is false)
     if (BUY_ENABLED) {
       if (!dryRun) {
@@ -267,6 +275,14 @@
       return;
     }
 
+    // Activate the Sell tab before placing the order
+    const sellTab = document.querySelector(".bn-tabs__buySell #bn-tab-1");
+    if (sellTab) {
+      console.log('AlphaRoller: activate sell tab');
+      clickElement(sellTab);
+      await new Promise(r => setTimeout(r, 120));
+    }
+
     // SELL - Limit Order (use same price input, find quantity input)
     const sellPrice = getRealTimePrice() || price;
     const limitSellPriceInput = document.getElementById('limitPrice'); // May reuse same input
@@ -301,7 +317,7 @@
           const qtyInput = document.querySelector('input[placeholder*="quantity" i], input[placeholder*="amount" i]');
           if (qtyInput) await fillInput(qtyInput, sellQty);
         }
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 200));  
         clickElement(sellButton);
       } else {
         console.warn('AlphaRoller: Limit sell price input not found');
