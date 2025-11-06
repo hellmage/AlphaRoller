@@ -2,6 +2,10 @@
 (function() {
   'use strict';
 
+  // Temporary toggles
+  const BUY_ENABLED = false;
+  const SELL_ENABLED = true;
+
   // External dependencies (will be set by content.js)
   let externalAPI = {
     getCurrentAlphaContract: null,
@@ -222,36 +226,46 @@
     })();
     const quoteSymbol = 'USDT';
 
-    // BUY - Limit Order
-    if (!dryRun) {
-      if (limitPriceInput && limitTotalInput) {
-        await fillInput(limitPriceInput, price);
-        await new Promise(r => setTimeout(r, 100));
-        await fillInput(limitTotalInput, amountUsd);
-        await new Promise(r => setTimeout(r, 200));
-        clickElement(buyButton);
+    // BUY - Limit Order (temporarily disabled if BUY_ENABLED is false)
+    if (BUY_ENABLED) {
+      if (!dryRun) {
+        if (limitPriceInput && limitTotalInput) {
+          await fillInput(limitPriceInput, price);
+          await new Promise(r => setTimeout(r, 100));
+          await fillInput(limitTotalInput, amountUsd);
+          await new Promise(r => setTimeout(r, 200));
+          clickElement(buyButton);
+        } else {
+          console.warn('AlphaRoller: Limit order inputs not found (limitPrice, limitTotal)');
+        }
       } else {
-        console.warn('AlphaRoller: Limit order inputs not found (limitPrice, limitTotal)');
+        console.log(`AlphaRoller [DRY RUN]: Limit Buy - Price: ${price}, Total: ${amountUsd} USDT`);
+      }
+
+      chrome.runtime.sendMessage({
+        action: 'buyPlaced',
+        contract: contract,
+        price,
+        usdtAmount: amountUsd,
+        quantity,
+        dryRun: dryRun,
+        timestamp: Date.now()
+      });
+      if (sidePanel) {
+        sidePanel.addLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol });
       }
     } else {
-      console.log(`AlphaRoller [DRY RUN]: Limit Buy - Price: ${price}, Total: ${amountUsd} USDT`);
-    }
-
-    chrome.runtime.sendMessage({
-      action: 'buyPlaced',
-      contract: contract,
-      price,
-      usdtAmount: amountUsd,
-      quantity,
-      dryRun: dryRun,
-      timestamp: Date.now()
-    });
-    if (sidePanel) {
-      sidePanel.addLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol });
+      console.log('AlphaRoller: BUY operation temporarily disabled. Skipping buy step.');
     }
 
     // Wait briefly to simulate/allow order execution
     await new Promise(r => setTimeout(r, 1200));
+
+    // SELL temporarily disabled
+    if (!SELL_ENABLED) {
+      console.log('AlphaRoller: SELL operation temporarily disabled. Skipping sell step.');
+      return;
+    }
 
     // SELL - Limit Order (use same price input, find quantity input)
     const sellPrice = getRealTimePrice() || price;
