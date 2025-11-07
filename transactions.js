@@ -188,23 +188,29 @@
       clickElement(buyTab);
       await new Promise(r => setTimeout(r, 120));
     }
+    const instantTab = document.getElementById("bn-tab-INSTANT");
+    if (instantTab) {
+      console.log('AlphaRoller: activate buy instant tab');
+      clickElement(instantTab);
+      await new Promise(r => setTimeout(r, 120));
+    }
 
-    // BUY - Limit Order (temporarily disabled if BUY_ENABLED is false)
+    // BUY - Instant Order (temporarily disabled if BUY_ENABLED is false)
     if (!BUY_ENABLED) {
       console.log('AlphaRoller: BUY operation temporarily disabled. Skipping buy step.');
       return false;
     }
 
     const { buyButton } = findTradeInputs();
-    const limitPriceInput = document.getElementById('limitPrice');
-    const limitTotalInput = document.getElementById('limitTotal');
+    // For instant orders, we only need the amount input (no price needed)
+    const instantAmountInput = document.getElementById('fromCoinAmount');
 
     if (!dryRun) {
-      if (limitPriceInput && limitTotalInput && buyButton) {
-        await fillInput(limitPriceInput, price);
-        await new Promise(r => setTimeout(r, 100));
-        await fillInput(limitTotalInput, amountUsd);
-        await new Promise(r => setTimeout(r, 200));
+      if (instantAmountInput && buyButton) {
+        await fillInput(instantAmountInput, amountUsd);
+        // Make sure input loses focus
+        instantAmountInput.blur();
+        await new Promise(r => setTimeout(r, 3000));
         clickElement(buyButton);
         // Handle post-buy confirmation dialog (click "Continue") if it appears
         await new Promise(r => setTimeout(r, 1000));
@@ -216,11 +222,11 @@
           }
         } catch (_) {}
       } else {
-        console.warn('AlphaRoller: Limit order inputs not found (limitPrice, limitTotal) or buy button missing');
+        console.warn('AlphaRoller: Instant order amount input not found or buy button missing');
         return false;
       }
     } else {
-      console.log(`AlphaRoller [DRY RUN]: Limit Buy - Price: ${price}, Total: ${amountUsd} USDT`);
+      console.log(`AlphaRoller [DRY RUN]: Instant Buy - Total: ${amountUsd} USDT`);
     }
 
     chrome.runtime.sendMessage({
@@ -252,14 +258,15 @@
       clickElement(sellTab);
       await new Promise(r => setTimeout(r, 120));
     }
+    const instantTab = document.getElementById("bn-tab-INSTANT");
+    if (instantTab) {
+      console.log('AlphaRoller: activate sell instant tab');
+      clickElement(instantTab);
+      await new Promise(r => setTimeout(r, 120));
+    }
 
-    // SELL - Limit Order (use same price input, find quantity input)
-    const sellPrice = getRealTimePrice() || price;
-    const limitSellPriceInput = document.getElementById('limitPrice'); // May reuse same input
-    const limitAmountInput = document.getElementById('limitAmount');
-    const limitQuantityInput = document.getElementById('limitQuantity') || 
-                               document.getElementById('limitTotal');
-
+    // SELL - Instant Order (use quantity input, no price needed)
+    const sellPrice = getRealTimePrice() || price; // For logging purposes
     // Read the actual available quantity from holdings summary element if present
     let sellQty = quantity;
     try {
@@ -275,18 +282,14 @@
 
     if (!dryRun) {
       const { sellButton } = findTradeInputs();
-      if (limitSellPriceInput && sellButton) {
-        await fillInput(limitSellPriceInput, sellPrice);
-        await new Promise(r => setTimeout(r, 100));
-        if (limitAmountInput) {
-          await fillInput(limitAmountInput, sellQty);
-        } else if (limitQuantityInput) {
-          await fillInput(limitQuantityInput, sellQty);
-        } else {
-          const qtyInput = document.querySelector('input[placeholder*="quantity" i], input[placeholder*="amount" i]');
-          if (qtyInput) await fillInput(qtyInput, sellQty);
-        }
-        await new Promise(r => setTimeout(r, 200));
+      // For instant orders, we only need the amount/quantity input (no price needed)
+      const instantAmountInput = document.getElementById('fromCoinAmount');
+      
+      if (instantAmountInput && sellButton) {
+        await fillInput(instantAmountInput, sellQty);
+        // Make sure input loses focus
+        instantAmountInput.blur();
+        await new Promise(r => setTimeout(r, 3000));
         clickElement(sellButton);
         // Handle post-sell confirmation dialog (click "Continue") if it appears
         await new Promise(r => setTimeout(r, 1000));
@@ -298,11 +301,11 @@
           }
         } catch (_) {}
       } else {
-        console.warn('AlphaRoller: Limit sell price input or sell button not found');
+        console.warn('AlphaRoller: Instant order amount input or sell button not found');
         return false;
       }
     } else {
-      console.log(`AlphaRoller [DRY RUN]: Limit Sell - Price: ${sellPrice}, Quantity: ${sellQty}`);
+      console.log(`AlphaRoller [DRY RUN]: Instant Sell - Quantity: ${sellQty}`);
     }
 
     chrome.runtime.sendMessage({
