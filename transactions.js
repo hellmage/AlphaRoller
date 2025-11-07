@@ -215,7 +215,7 @@
         let attempts = 0;
         while (buyButton && buyButton.classList && buyButton.classList.contains('inactive') && attempts < 20) {
           console.log('AlphaRoller: waiting for buy button to become active');
-          await new Promise(r => setTimeout(r, 150));
+          await new Promise(r => setTimeout(r, 500));
           attempts += 1;
         }
         if (buyButton && buyButton.classList && buyButton.classList.contains('inactive')) {

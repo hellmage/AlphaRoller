@@ -48,8 +48,8 @@
         chrome.storage.local.set({ dryRunEnabled });
         sendResponse({ success: true });
       } else if (request.action === 'commitNow') {
-        if (window.AlphaRollerTransactions) {
-          window.AlphaRollerTransactions.attemptCommitTransaction();
+        if (window.AlphaRollerTransactions && window.AlphaRollerTransactions.startRoundTripTransaction) {
+          window.AlphaRollerTransactions.startRoundTripTransaction();
         }
         sendResponse({ success: true });
       } else if (request.action === 'getCurrentAlpha') {
