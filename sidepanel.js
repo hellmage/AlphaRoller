@@ -13,6 +13,7 @@
   let usdtAmount = 100; // default user-entered amount for transaction
   let operationLogs = []; // recent buy/sell logs, latest first
   let sidePanelWidth = 300; // px, resizable
+  let targetUsdtAmount = 1000; // target cumulative amount for multiple transactions
 
   // External dependencies (will be set by content.js)
   let externalAPI = {
@@ -95,21 +96,7 @@
     ].join(';'));
     startBtn.addEventListener('click', async () => {
       if (startBtn.disabled) return;
-      const prevText = startBtn.textContent;
-      startBtn.textContent = 'Processing...';
-      startBtn.disabled = true;
-      try {
-        if (externalAPI.startRoundTripTransaction) {
-          await externalAPI.startRoundTripTransaction();
-        }
-      } catch (e) {
-        console.error('AlphaRoller: Round-trip transaction error', e);
-      } finally {
-        setTimeout(() => {
-          startBtn.textContent = prevText;
-          startBtn.disabled = false;
-        }, 1500);
-      }
+      await runRoundTripsToTarget(startBtn);
     });
 
     const closeBtn = document.createElement('button');
@@ -175,11 +162,20 @@
 
     // Amount input (USDT)
     const amountRow = document.createElement('div');
-    amountRow.setAttribute('style', 'display:flex; flex-direction: column; gap: 6px;');
-    const amountLabel = document.createElement('label');
-    amountLabel.setAttribute('for', 'alpharoller-amount');
-    amountLabel.textContent = 'Amount (USDT)';
+    amountRow.setAttribute('style', 'display:flex; flex-direction: column; gap: 8px;');
+    const amountLabel = document.createElement('div');
+    amountLabel.textContent = 'Amounts (USDT)';
     amountLabel.setAttribute('style', 'opacity: 0.7; font-size: 12px;');
+
+    const amountInputsWrapper = document.createElement('div');
+    amountInputsWrapper.setAttribute('style', 'display:flex; gap: 10px;');
+
+    const perTxnWrapper = document.createElement('div');
+    perTxnWrapper.setAttribute('style', 'flex:1; display:flex; flex-direction:column; gap:4px;');
+    const perTxnLabel = document.createElement('label');
+    perTxnLabel.setAttribute('for', 'alpharoller-amount');
+    perTxnLabel.textContent = 'Per Transaction';
+    perTxnLabel.setAttribute('style', 'opacity: 0.65; font-size: 11px;');
     const amountInput = document.createElement('input');
     amountInput.id = 'alpharoller-amount';
     amountInput.type = 'number';
@@ -195,7 +191,6 @@
       'font-size: 14px',
       'outline: none'
     ].join(';'));
-    // Set default visible value
     amountInput.value = String(usdtAmount);
     amountInput.addEventListener('input', () => {
       const val = parseFloat(amountInput.value);
@@ -204,18 +199,63 @@
         chrome.storage.local.set({ usdtAmount: val });
       }
     });
-    // Load saved value
-    chrome.storage.local.get(['usdtAmount'], (res) => {
+    perTxnWrapper.appendChild(perTxnLabel);
+    perTxnWrapper.appendChild(amountInput);
+
+    const targetWrapper = document.createElement('div');
+    targetWrapper.setAttribute('style', 'flex:1; display:flex; flex-direction:column; gap:4px;');
+    const targetLabel = document.createElement('label');
+    targetLabel.setAttribute('for', 'alpharoller-target-amount');
+    targetLabel.textContent = 'Target Total';
+    targetLabel.setAttribute('style', 'opacity: 0.65; font-size: 11px;');
+    const targetInput = document.createElement('input');
+    targetInput.id = 'alpharoller-target-amount';
+    targetInput.type = 'number';
+    targetInput.min = '0';
+    targetInput.step = '0.01';
+    targetInput.placeholder = 'e.g. 1000.00';
+    targetInput.setAttribute('style', [
+      'padding: 8px 10px',
+      'border-radius: 6px',
+      'border: 1px solid rgba(255,255,255,0.12)',
+      'background: #1e2329',
+      'color: #eaecef',
+      'font-size: 14px',
+      'outline: none'
+    ].join(';'));
+    targetInput.value = String(targetUsdtAmount);
+    targetInput.addEventListener('input', () => {
+      const val = parseFloat(targetInput.value);
+      if (!isNaN(val) && val >= 0) {
+        targetUsdtAmount = val;
+        chrome.storage.local.set({ targetUsdtAmount: val });
+      }
+    });
+    targetWrapper.appendChild(targetLabel);
+    targetWrapper.appendChild(targetInput);
+
+    amountInputsWrapper.appendChild(perTxnWrapper);
+    amountInputsWrapper.appendChild(targetWrapper);
+
+    amountRow.appendChild(amountLabel);
+    amountRow.appendChild(amountInputsWrapper);
+
+    // Load saved values
+    chrome.storage.local.get(['usdtAmount', 'targetUsdtAmount'], (res) => {
       if (typeof res.usdtAmount === 'number' && res.usdtAmount >= 0) {
         usdtAmount = res.usdtAmount;
         amountInput.value = String(res.usdtAmount);
       } else {
-        // Persist default if not present
         chrome.storage.local.set({ usdtAmount });
       }
+
+      if (typeof res.targetUsdtAmount === 'number' && res.targetUsdtAmount >= 0) {
+        targetUsdtAmount = res.targetUsdtAmount;
+        targetInput.value = String(res.targetUsdtAmount);
+      } else {
+        chrome.storage.local.set({ targetUsdtAmount });
+      }
     });
-    amountRow.appendChild(amountLabel);
-    amountRow.appendChild(amountInput);
 
     body.appendChild(symbolRow);
     body.appendChild(priceRow);
@@ -256,6 +296,70 @@
 
     // Attach resize handlers
     attachSidePanelResizer(sidePanel);
+  }
+
+  async function runRoundTripsToTarget(startBtn) {
+    const prevText = startBtn.textContent;
+    startBtn.textContent = 'Processing...';
+    startBtn.disabled = true;
+
+    try {
+      if (!externalAPI.startRoundTripTransaction) {
+        console.warn('AlphaRoller: startRoundTripTransaction API not available.');
+        return;
+      }
+
+      const perAmount = usdtAmount;
+      const targetAmount = targetUsdtAmount;
+
+      if (perAmount <= 0 || targetAmount <= 0) {
+        console.warn('AlphaRoller: Invalid per-transaction or target amount.');
+        return;
+      }
+
+      let accumulated = 0;
+      let round = 0;
+      const maxRounds = 200;
+
+      while (accumulated < targetAmount && round < maxRounds) {
+        const remaining = targetAmount - accumulated;
+        const amountThisRound = Math.min(perAmount, remaining);
+        if (amountThisRound <= 0) break;
+
+        round += 1;
+        const cumulativeAfter = accumulated + amountThisRound;
+
+        const success = await externalAPI.startRoundTripTransaction({
+          amountOverride: amountThisRound,
+          cumulativeAmount: cumulativeAfter,
+          round,
+          targetAmount,
+          remainingAmount: Math.max(targetAmount - cumulativeAfter, 0)
+        });
+
+        if (!success) {
+          console.warn(`AlphaRoller: Round trip aborted at round ${round}.`);
+          break;
+        }
+
+        accumulated = cumulativeAfter;
+
+        if (accumulated >= targetAmount) {
+          break;
+        }
+
+        await new Promise(r => setTimeout(r, 800));
+      }
+
+      console.log(`AlphaRoller: Completed round trip sequence. Total executed: ${accumulated} USDT over ${round} rounds.`);
+    } catch (e) {
+      console.error('AlphaRoller: Round-trip transaction error', e);
+    } finally {
+      setTimeout(() => {
+        startBtn.textContent = prevText;
+        startBtn.disabled = false;
+      }, 600);
+    }
   }
 
   function removeSidePanel() {
@@ -375,12 +479,14 @@
       const qtyStr = typeof item.quantity === 'number' ? item.quantity.toFixed(8) : '-';
       const fromSym = item.fromSymbol || '-';
       const toSym = item.toSymbol || '-';
+      const cumulativeStr = typeof item.cumulativeAmount === 'number' ? item.cumulativeAmount.toFixed(2) : '-';
       return `<div style="display:flex; justify-content:space-between; gap:8px;">
         <div style="opacity:.7; font-size:12px; min-width:62px;">${ts}</div>
         <div style="font-size:12px; font-weight:700; min-width:36px;">${item.type.toUpperCase()}</div>
         <div style="font-size:12px;">${fromSym} → ${toSym}</div>
         <div style="font-size:12px;">Price: ${priceStr}</div>
         <div style="font-size:12px;">Qty: ${qtyStr}</div>
+        <div style="font-size:12px;">Accum: ${cumulativeStr}</div>
       </div>`;
     }).join('');
   }
@@ -423,13 +529,22 @@
     getUsdtAmount: function() {
       return usdtAmount;
     },
+    getTargetUsdtAmount: function() {
+      return targetUsdtAmount;
+    },
     
     // Load initial state
     init: function() {
-      chrome.storage.local.get(['sidePanelEnabled', 'sidePanelWidth'], (res) => {
+      chrome.storage.local.get(['sidePanelEnabled', 'sidePanelWidth', 'usdtAmount', 'targetUsdtAmount'], (res) => {
         if (res.sidePanelEnabled !== undefined) sidePanelEnabled = !!res.sidePanelEnabled;
         if (typeof res.sidePanelWidth === 'number' && res.sidePanelWidth >= 200 && res.sidePanelWidth <= 1000) {
           sidePanelWidth = res.sidePanelWidth;
+        }
+        if (typeof res.usdtAmount === 'number' && res.usdtAmount >= 0) {
+          usdtAmount = res.usdtAmount;
+        }
+        if (typeof res.targetUsdtAmount === 'number' && res.targetUsdtAmount >= 0) {
+          targetUsdtAmount = res.targetUsdtAmount;
         }
       });
     }

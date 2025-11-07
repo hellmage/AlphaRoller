@@ -180,7 +180,7 @@
   // =========================
   // Transaction Execution Functions
   // =========================
-  async function executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel) {
+  async function executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel, cumulativeAmount) {
     // Activate the Buy tab before placing the order
     const buyTab = document.querySelector(".bn-tabs__buySell #bn-tab-0");
     if (buyTab) {
@@ -248,16 +248,17 @@
       usdtAmount: amountUsd,
       quantity,
       dryRun: dryRun,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      cumulativeAmount
     });
     if (sidePanel) {
-      sidePanel.addLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol });
+      sidePanel.addLog({ type: 'buy', price, quantity, timestamp: Date.now(), fromSymbol: quoteSymbol, toSymbol: baseSymbol, cumulativeAmount });
     }
 
     return true;
   }
 
-  async function executeSellOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel) {
+  async function executeSellOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel, cumulativeAmount) {
     if (!SELL_ENABLED) {
       console.log('AlphaRoller: SELL operation temporarily disabled. Skipping sell step.');
       return false;
@@ -327,35 +328,42 @@
       usdtAmount: amountUsd,
       quantity: sellQty,
       dryRun: dryRun,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      cumulativeAmount
     });
     if (sidePanel) {
-      sidePanel.addLog({ type: 'sell', price: sellPrice, quantity: sellQty, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol });
+      sidePanel.addLog({ type: 'sell', price: sellPrice, quantity: sellQty, timestamp: Date.now(), fromSymbol: baseSymbol, toSymbol: quoteSymbol, cumulativeAmount });
     }
 
     return true;
   }
 
-  async function startRoundTripTransaction() {
+  async function startRoundTripTransaction(options = {}) {
     const contract = externalAPI.getCurrentAlphaContract ? externalAPI.getCurrentAlphaContract() : null;
     if (!contract) {
       console.warn('AlphaRoller: Not on an Alpha contract page.');
-      return;
+      return false;
     }
     const price = getRealTimePrice();
     if (!price) {
       console.warn('AlphaRoller: Unable to read real-time price.');
-      return;
+      return false;
     }
     const sidePanel = externalAPI.getSidePanel ? externalAPI.getSidePanel() : null;
-    const amountUsd = sidePanel ? sidePanel.getUsdtAmount() : 0;
+    const overrideAmount = (options && typeof options.amountOverride === 'number' && options.amountOverride >= 0)
+      ? options.amountOverride
+      : null;
+    const amountUsd = overrideAmount !== null
+      ? overrideAmount
+      : sidePanel ? sidePanel.getUsdtAmount() : 0;
     if (amountUsd <= 0) {
       console.warn('AlphaRoller: Invalid USDT amount.');
-      return;
+      return false;
     }
 
     const quantity = amountUsd / price;
     const dryRun = externalAPI.getDryRunEnabled ? externalAPI.getDryRunEnabled() : true;
+    const cumulativeAmount = (options && typeof options.cumulativeAmount === 'number') ? options.cumulativeAmount : null;
 
     chrome.runtime.sendMessage({
       action: 'transactionStarted',
@@ -364,7 +372,8 @@
       usdtAmount: amountUsd,
       quantity,
       dryRun: dryRun,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      cumulativeAmount
     });
 
     // Determine symbols
@@ -377,10 +386,10 @@
     const quoteSymbol = 'USDT';
 
     // Execute buy order
-    const buySuccess = await executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel);
+    const buySuccess = await executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel, cumulativeAmount);
     if (!buySuccess) {
       console.warn('AlphaRoller: Buy operation failed or aborted, skipping sell.');
-      return;
+      return false;
     }
 
     // Wait briefly to simulate/allow order execution
@@ -389,9 +398,15 @@
     // SELL
     if (!SELL_ENABLED) {
       console.log('AlphaRoller: SELL operation temporarily disabled. Skipping sell step.');
-      return;
+      return false;
     }
-    await executeSellOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel);
+    const sellSuccess = await executeSellOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel, cumulativeAmount);
+    if (!sellSuccess) {
+      console.warn('AlphaRoller: Sell operation failed.');
+      return false;
+    }
+
+    return true;
   }
 
   function attemptCommitTransaction() {
