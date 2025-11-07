@@ -71,13 +71,37 @@
     return isFinite(value) ? value : null;
   }
 
+  async function activateInstantBuyTab(options = {}) {
+    const delay = typeof options.delay === 'number' ? options.delay : 120;
+    let changed = false;
+
+    const buyTab = document.querySelector('.bn-tabs__buySell #bn-tab-0');
+    if (buyTab) {
+      console.log('AlphaRoller: activate buy tab');
+      safeClick(buyTab);
+      await sleep(delay);
+      changed = true;
+    }
+
+    const instantTab = document.getElementById('bn-tab-INSTANT');
+    if (instantTab) {
+      console.log('AlphaRoller: activate buy instant tab');
+      safeClick(instantTab);
+      await sleep(delay);
+      changed = true;
+    }
+
+    return changed;
+  }
+
   window.AlphaRollerUtils = Object.assign({}, existingUtils, {
     sleep,
     waitForCondition,
     dispatchInputEvents,
     safeClick,
     formatNumber,
-    parseNumberFromText
+    parseNumberFromText,
+    activateInstantBuyTab
   });
 })();
 

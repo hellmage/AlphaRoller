@@ -305,11 +305,14 @@
     attachSidePanelResizer(sidePanel);
   }
 
-  function getFund(el) {
+  async function getFund() {
+    await utils.activateInstantBuyTab();
+    sleep(1000);
     const initFundEl = document.querySelector('.text-TertiaryText > .items-center > .text-PrimaryText');
-      if (initFundEl && initFundEl.textContent) {
-        return utils.parseNumberFromText(initFundEl.textContent);
-      }
+    if (initFundEl && initFundEl.textContent) {
+      return utils.parseNumberFromText(initFundEl.textContent);
+    }
+    return null;
   }
 
   async function runRoundTripsToTarget(startBtn) {
@@ -331,7 +334,7 @@
         return;
       }
 
-      const initFund = getFund();
+      const initFund = await getFund();
       if (initFund) {
         console.log('AlphaRoller: Initial fund:', initFund);
       } else {
@@ -369,21 +372,21 @@
           break;
         }
 
-        await sleep(800);
+        await sleep(2000);
       }
 
       console.log(`AlphaRoller: Completed round trip sequence. Total executed: ${accumulated} USDT over ${round} rounds.`);
     } catch (e) {
       console.error('AlphaRoller: Round-trip transaction error', e);
     } finally {
-      setTimeout(() => {
-        const endFund = getFund();
-      if (endFund) {
-        console.log('AlphaRoller: ending fund:', endFund);
-        console.log('AlphaRoller: cost:', initFund - endFund);
-      } else {
-        console.warn('AlphaRoller: Invalid ending fund.');
-      }
+      setTimeout(async () => {
+        const endFund = await getFund();
+        if (endFund) {
+          console.log('AlphaRoller: ending fund:', endFund);
+          console.log('AlphaRoller: cost:', initFund - endFund);
+        } else {
+          console.warn('AlphaRoller: Invalid ending fund.');
+        }
         
         startBtn.textContent = prevText;
         startBtn.disabled = false;

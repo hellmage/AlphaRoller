@@ -38,6 +38,7 @@
     const value = parseFloat(cleaned);
     return isFinite(value) ? value : null;
   });
+  const activateInstantBuyTab = utils.activateInstantBuyTab || (async () => false);
 
   // External dependencies (will be set by content.js)
   let externalAPI = {
@@ -210,18 +211,7 @@
   // =========================
   async function executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel, cumulativeAmount) {
     // Activate the Buy tab before placing the order
-    const buyTab = document.querySelector(".bn-tabs__buySell #bn-tab-0");
-    if (buyTab) {
-      console.log('AlphaRoller: activate buy tab');
-      clickElement(buyTab);
-      await sleep(120);
-    }
-    const instantTab = document.getElementById("bn-tab-INSTANT");
-    if (instantTab) {
-      console.log('AlphaRoller: activate buy instant tab');
-      clickElement(instantTab);
-      await sleep(120);
-    }
+    await activateInstantBuyTab();
 
     // BUY - Instant Order (temporarily disabled if BUY_ENABLED is false)
     if (!BUY_ENABLED) {
