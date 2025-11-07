@@ -3,7 +3,7 @@
   'use strict';
 
   // Temporary toggles
-  const BUY_ENABLED = false;
+  const BUY_ENABLED = true;
   const SELL_ENABLED = true;
 
   // External dependencies (will be set by content.js)
@@ -206,6 +206,15 @@
         await fillInput(limitTotalInput, amountUsd);
         await new Promise(r => setTimeout(r, 200));
         clickElement(buyButton);
+        // Handle post-buy confirmation dialog (click "Continue") if it appears
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const continueBtn = document.querySelector('[role=dialog] .bn-button__primary.data-size-middle');
+          if (continueBtn) {
+            console.log('AlphaRoller: clicking Continue in confirmation dialog');
+            clickElement(continueBtn);
+          }
+        } catch (_) {}
       } else {
         console.warn('AlphaRoller: Limit order inputs not found (limitPrice, limitTotal) or buy button missing');
         return false;
@@ -279,6 +288,15 @@
         }
         await new Promise(r => setTimeout(r, 200));
         clickElement(sellButton);
+        // Handle post-sell confirmation dialog (click "Continue") if it appears
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const continueBtn = document.querySelector('[role=dialog] .bn-button__primary.data-size-middle');
+          if (continueBtn) {
+            console.log('AlphaRoller: clicking Continue in sell confirmation dialog');
+            clickElement(continueBtn);
+          }
+        } catch (_) {}
       } else {
         console.warn('AlphaRoller: Limit sell price input or sell button not found');
         return false;
@@ -347,7 +365,7 @@
     await executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel);
 
     // Wait briefly to simulate/allow order execution
-    await new Promise(r => setTimeout(r, 1200));
+    await new Promise(r => setTimeout(r, 10000));
 
     // SELL
     if (!SELL_ENABLED) {
