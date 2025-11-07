@@ -2,8 +2,6 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   const enableToggle = document.getElementById('enableToggle');
-  const scanButton = document.getElementById('scanButton');
-  const refreshButton = document.getElementById('refreshButton');
   const statusElement = document.getElementById('status');
   const symbolCountElement = document.getElementById('symbolCount');
   const symbolListElement = document.getElementById('symbolList');
@@ -58,26 +56,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Scan for symbols
-  if (scanButton) {
-    scanButton.addEventListener('click', async () => {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab.url && tab.url.includes('binance.com')) {
-        chrome.tabs.sendMessage(tab.id, { action: 'scanSymbols' });
-        setTimeout(loadState, 500); // Reload state after scanning
-      } else {
-        alert('Please navigate to Binance website first');
-      }
-    });
-  }
-
-  // Refresh status
-  if (refreshButton) {
-    refreshButton.addEventListener('click', () => {
-      loadState();
-      checkCurrentAlphaPage();
-    });
-  }
 
   // Commit button
   if (commitButton) {
