@@ -210,7 +210,19 @@
         await fillInput(instantAmountInput, amountUsd);
         // Make sure input loses focus
         instantAmountInput.blur();
-        await new Promise(r => setTimeout(r, 3000));
+
+        // Ensure buy button is clickable (not marked inactive)
+        let attempts = 0;
+        while (buyButton && buyButton.classList && buyButton.classList.contains('inactive') && attempts < 20) {
+          console.log('AlphaRoller: waiting for buy button to become active');
+          await new Promise(r => setTimeout(r, 150));
+          attempts += 1;
+        }
+        if (buyButton && buyButton.classList && buyButton.classList.contains('inactive')) {
+          console.warn('AlphaRoller: buy button remains inactive, aborting buy click');
+          return false;
+        }
+
         clickElement(buyButton);
         // Handle post-buy confirmation dialog (click "Continue") if it appears
         await new Promise(r => setTimeout(r, 1000));
@@ -365,7 +377,11 @@
     const quoteSymbol = 'USDT';
 
     // Execute buy order
-    await executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel);
+    const buySuccess = await executeBuyOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel);
+    if (!buySuccess) {
+      console.warn('AlphaRoller: Buy operation failed or aborted, skipping sell.');
+      return;
+    }
 
     // Wait briefly to simulate/allow order execution
     await new Promise(r => setTimeout(r, 10000));
