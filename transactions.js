@@ -6,6 +6,39 @@
   const BUY_ENABLED = true;
   const SELL_ENABLED = true;
 
+  const utils = window.AlphaRollerUtils || {};
+  const sleep = utils.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const safeClick = utils.safeClick || ((el) => {
+    try {
+      if (!el) return false;
+      if (typeof el.click === 'function') {
+        el.click();
+        return true;
+      }
+      if (typeof el.onclick === 'function') {
+        el.onclick();
+        return true;
+      }
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      return true;
+    } catch (err) {
+      console.error('AlphaRoller: safeClick fallback error', err);
+      return false;
+    }
+  });
+  const dispatchInputEvents = utils.dispatchInputEvents || ((element) => {
+    if (!element) return;
+    element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+  });
+  const parseNumberFromText = utils.parseNumberFromText || ((text) => {
+    if (typeof text !== 'string') return null;
+    const cleaned = text.trim().replace(/[\s,]/g, '');
+    if (!cleaned) return null;
+    const value = parseFloat(cleaned);
+    return isFinite(value) ? value : null;
+  });
+
   // External dependencies (will be set by content.js)
   let externalAPI = {
     getCurrentAlphaContract: null,
@@ -83,19 +116,14 @@
     const valStr = String(value);
     element.focus();
     element.value = '';
-    element.dispatchEvent(new Event('input', { bubbles: true }));
+    dispatchInputEvents(element);
     element.value = valStr;
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
+    dispatchInputEvents(element);
+    await sleep(0);
   }
 
   function clickElement(el) {
-    if (!el) return;
-    if (el.click) el.click();
-    else if (el.dispatchEvent) {
-      const event = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-      el.dispatchEvent(event);
-    }
+    safeClick(el);
   }
 
   function findCommitButton() {
@@ -186,13 +214,13 @@
     if (buyTab) {
       console.log('AlphaRoller: activate buy tab');
       clickElement(buyTab);
-      await new Promise(r => setTimeout(r, 120));
+      await sleep(120);
     }
     const instantTab = document.getElementById("bn-tab-INSTANT");
     if (instantTab) {
       console.log('AlphaRoller: activate buy instant tab');
       clickElement(instantTab);
-      await new Promise(r => setTimeout(r, 120));
+      await sleep(120);
     }
 
     // BUY - Instant Order (temporarily disabled if BUY_ENABLED is false)
@@ -215,7 +243,7 @@
         let attempts = 0;
         while (buyButton && buyButton.classList && buyButton.classList.contains('inactive') && attempts < 20) {
           console.log('AlphaRoller: waiting for buy button to become active');
-          await new Promise(r => setTimeout(r, 500));
+          await sleep(500);
           attempts += 1;
         }
         if (buyButton && buyButton.classList && buyButton.classList.contains('inactive')) {
@@ -225,7 +253,7 @@
 
         clickElement(buyButton);
         // Handle post-buy confirmation dialog (click "Continue") if it appears
-        await new Promise(r => setTimeout(r, 1000));
+        await sleep(1000);
         try {
           const continueBtn = document.querySelector('[role=dialog] .bn-button__primary.data-size-middle');
           if (continueBtn) {
@@ -269,13 +297,13 @@
     if (sellTab) {
       console.log('AlphaRoller: activate sell tab');
       clickElement(sellTab);
-      await new Promise(r => setTimeout(r, 120));
+      await sleep(120);
     }
     const instantTab = document.getElementById("bn-tab-INSTANT");
     if (instantTab) {
       console.log('AlphaRoller: activate sell instant tab');
       clickElement(instantTab);
-      await new Promise(r => setTimeout(r, 120));
+      await sleep(120);
     }
 
     // SELL - Instant Order (use quantity input, no price needed)
@@ -285,9 +313,8 @@
     try {
       const qtyTextEl = document.querySelector('.text-TertiaryText > .items-center > .text-PrimaryText');
       if (qtyTextEl && qtyTextEl.textContent) {
-        const rawQty = qtyTextEl.textContent.trim().replace(/[\,\s]/g, '');
-        const parsedQty = parseFloat(rawQty);
-        if (isFinite(parsedQty) && parsedQty > 0) {
+        const parsedQty = parseNumberFromText(qtyTextEl.textContent);
+        if (parsedQty && parsedQty > 0) {
           sellQty = parsedQty;
         }
       }
@@ -302,10 +329,10 @@
         await fillInput(instantAmountInput, sellQty);
         // Make sure input loses focus
         instantAmountInput.blur();
-        await new Promise(r => setTimeout(r, 3000));
+        await sleep(3000);
         clickElement(sellButton);
         // Handle post-sell confirmation dialog (click "Continue") if it appears
-        await new Promise(r => setTimeout(r, 1000));
+        await sleep(1000);
         try {
           const continueBtn = document.querySelector('[role=dialog] .bn-button__primary.data-size-middle');
           if (continueBtn) {
@@ -393,7 +420,7 @@
     }
 
     // Wait briefly to simulate/allow order execution
-    await new Promise(r => setTimeout(r, 10000));
+    await sleep(5000);
 
     // SELL
     if (!SELL_ENABLED) {

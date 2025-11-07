@@ -15,6 +15,13 @@
   let sidePanelWidth = 300; // px, resizable
   let targetUsdtAmount = 1000; // target cumulative amount for multiple transactions
 
+  const utils = window.AlphaRollerUtils || {};
+  const sleep = utils.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const formatNumber = utils.formatNumber || ((value, decimals = 2) => {
+    if (typeof value !== 'number' || !isFinite(value)) return '-';
+    return Number(value).toFixed(decimals);
+  });
+
   // External dependencies (will be set by content.js)
   let externalAPI = {
     startRoundTripTransaction: null,
@@ -298,6 +305,13 @@
     attachSidePanelResizer(sidePanel);
   }
 
+  function getFund(el) {
+    const initFundEl = document.querySelector('.text-TertiaryText > .items-center > .text-PrimaryText');
+      if (initFundEl && initFundEl.textContent) {
+        return utils.parseNumberFromText(initFundEl.textContent);
+      }
+  }
+
   async function runRoundTripsToTarget(startBtn) {
     const prevText = startBtn.textContent;
     startBtn.textContent = 'Processing...';
@@ -315,6 +329,13 @@
       if (perAmount <= 0 || targetAmount <= 0) {
         console.warn('AlphaRoller: Invalid per-transaction or target amount.');
         return;
+      }
+
+      const initFund = getFund();
+      if (initFund) {
+        console.log('AlphaRoller: Initial fund:', initFund);
+      } else {
+        console.warn('AlphaRoller: Invalid initial fund.');
       }
 
       let accumulated = 0;
@@ -348,7 +369,7 @@
           break;
         }
 
-        await new Promise(r => setTimeout(r, 800));
+        await sleep(800);
       }
 
       console.log(`AlphaRoller: Completed round trip sequence. Total executed: ${accumulated} USDT over ${round} rounds.`);
@@ -356,6 +377,14 @@
       console.error('AlphaRoller: Round-trip transaction error', e);
     } finally {
       setTimeout(() => {
+        const endFund = getFund();
+      if (endFund) {
+        console.log('AlphaRoller: ending fund:', endFund);
+        console.log('AlphaRoller: cost:', initFund - endFund);
+      } else {
+        console.warn('AlphaRoller: Invalid ending fund.');
+      }
+        
         startBtn.textContent = prevText;
         startBtn.disabled = false;
       }, 600);
@@ -475,11 +504,11 @@
     if (!list) return;
     list.innerHTML = operationLogs.map(item => {
       const ts = new Date(item.timestamp).toLocaleTimeString();
-      const priceStr = typeof item.price === 'number' ? item.price.toPrecision(6) : '-';
-      const qtyStr = typeof item.quantity === 'number' ? item.quantity.toFixed(8) : '-';
+      const priceStr = typeof item.price === 'number' ? formatNumber(item.price, 6) : '-';
+      const qtyStr = typeof item.quantity === 'number' ? formatNumber(item.quantity, 8) : '-';
       const fromSym = item.fromSymbol || '-';
       const toSym = item.toSymbol || '-';
-      const cumulativeStr = typeof item.cumulativeAmount === 'number' ? item.cumulativeAmount.toFixed(2) : '-';
+      const cumulativeStr = typeof item.cumulativeAmount === 'number' ? formatNumber(item.cumulativeAmount, 2) : '-';
       return `<div style="display:flex; justify-content:space-between; gap:8px;">
         <div style="opacity:.7; font-size:12px; min-width:62px;">${ts}</div>
         <div style="font-size:12px; font-weight:700; min-width:36px;">${item.type.toUpperCase()}</div>
