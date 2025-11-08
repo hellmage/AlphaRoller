@@ -216,7 +216,7 @@
     // BUY - Instant Order (temporarily disabled if BUY_ENABLED is false)
     if (!BUY_ENABLED) {
       console.log('AlphaRoller: BUY operation temporarily disabled. Skipping buy step.');
-      return false;
+      return true;
     }
 
     const { buyButton } = findTradeInputs();
@@ -279,19 +279,19 @@
   async function executeSellOrder(price, amountUsd, quantity, contract, baseSymbol, quoteSymbol, dryRun, sidePanel, cumulativeAmount) {
     if (!SELL_ENABLED) {
       console.log('AlphaRoller: SELL operation temporarily disabled. Skipping sell step.');
-      return false;
+      return true;
     }
 
     // Activate the Sell tab before placing the order
     const sellTab = document.querySelector(".bn-tabs__buySell #bn-tab-1");
     if (sellTab) {
-      console.log('AlphaRoller: activate sell tab');
+      // console.log('AlphaRoller: activate sell tab');
       clickElement(sellTab);
       await sleep(120);
     }
     const instantTab = document.getElementById("bn-tab-INSTANT");
     if (instantTab) {
-      console.log('AlphaRoller: activate sell instant tab');
+      // console.log('AlphaRoller: activate sell instant tab');
       clickElement(instantTab);
       await sleep(120);
     }
@@ -299,16 +299,27 @@
     // SELL - Instant Order (use quantity input, no price needed)
     const sellPrice = getRealTimePrice() || price; // For logging purposes
     // Read the actual available quantity from holdings summary element if present
-    let sellQty = quantity;
-    try {
-      const qtyTextEl = document.querySelector('.text-TertiaryText > .items-center > .text-PrimaryText');
-      if (qtyTextEl && qtyTextEl.textContent) {
-        const parsedQty = parseNumberFromText(qtyTextEl.textContent);
-        if (parsedQty && parsedQty > 0) {
-          sellQty = parsedQty;
+    let sellQty = null;
+    let attempts = 0;
+    while (attempts < 20 && !sellQty) {
+      await sleep(500);
+      try {
+        const qtyTextEl = document.querySelector('.text-TertiaryText > .items-center > .text-PrimaryText');
+        if (qtyTextEl && qtyTextEl.textContent) {
+          const parsedQty = parseNumberFromText(qtyTextEl.textContent);
+          if (parsedQty && parsedQty > 0) {
+            sellQty = parsedQty;
+          }
         }
+      } catch (_) {}
+      finally {
+        attempts += 1;
       }
-    } catch (_) {}
+    }
+    if (!sellQty) {
+      console.warn('AlphaRoller: Unable to read sell quantity.');
+      return false;
+    }
 
     if (!dryRun) {
       const { sellButton } = findTradeInputs();
@@ -319,7 +330,19 @@
         await fillInput(instantAmountInput, sellQty);
         // Make sure input loses focus
         instantAmountInput.blur();
-        await sleep(3000);
+        
+        // Ensure sell button is clickable (not marked inactive)
+        let attempts = 0;
+        while (sellButton && sellButton.classList && sellButton.classList.contains('inactive') && attempts < 20) {
+          console.log('AlphaRoller: waiting for sell button to become active');
+          await sleep(500);
+          attempts += 1;
+        }
+        if (sellButton && sellButton.classList && sellButton.classList.contains('inactive')) {
+          console.warn('AlphaRoller: sell button remains inactive, aborting sell click');
+          return false;
+        }
+
         clickElement(sellButton);
         // Handle post-sell confirmation dialog (click "Continue") if it appears
         await sleep(1000);
@@ -330,6 +353,7 @@
             clickElement(continueBtn);
           }
         } catch (_) {}
+        await sleep(1000);
       } else {
         console.warn('AlphaRoller: Instant order amount input or sell button not found');
         return false;

@@ -77,7 +77,7 @@
 
     const buyTab = document.querySelector('.bn-tabs__buySell #bn-tab-0');
     if (buyTab) {
-      console.log('AlphaRoller: activate buy tab');
+    //   console.debug('AlphaRoller: activate buy tab');
       safeClick(buyTab);
       await sleep(delay);
       changed = true;
@@ -85,7 +85,7 @@
 
     const instantTab = document.getElementById('bn-tab-INSTANT');
     if (instantTab) {
-      console.log('AlphaRoller: activate buy instant tab');
+    //   console.debug('AlphaRoller: activate buy instant tab');
       safeClick(instantTab);
       await sleep(delay);
       changed = true;
