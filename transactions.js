@@ -251,6 +251,7 @@
             clickElement(continueBtn);
           }
         } catch (_) {}
+        await sleep(1000);
       } else {
         console.warn('AlphaRoller: Instant order amount input not found or buy button missing');
         return false;

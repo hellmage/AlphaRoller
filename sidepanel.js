@@ -372,7 +372,7 @@
           break;
         }
 
-        await sleep(5000);
+        await sleep(4000);
       }
 
       const endFund = await getFund();
